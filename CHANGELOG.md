@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.7] - 2026-10-19
+
+### Changed
+- **Nano Banana 2.1**: NB2 tier now uses `gemini-nano-banana-2.1` (was `gemini-3.1-flash-image-preview`); Pro tier uses the stable `gemini-3-pro-image` ID (preview IDs were deprecated 2026-06-25). Cherry-picked from upstream PR #36.
+
+### Fixed
+- **Packaging**: Exclude `.claude/` from the sdist so local Claude Code settings are never published.
+
 ## [0.4.6] - 2026-09-27
 
 ### Fixed

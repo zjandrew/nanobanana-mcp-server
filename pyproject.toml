@@ -1,6 +1,6 @@
 [project]
 name = "andrew-nanobanana-mcp-server"
-version = "0.4.6"
+version = "0.4.7"
 description = "A production-ready MCP server for AI-powered image generation using Gemini 3.1 Flash Image (Nano Banana 2, default), Gemini 3 Pro Image, and Gemini 2.5 Flash Image with intelligent model selection"
 authors = [
     { name = "zhongwei", email = "lizhongwei.nkcs@gmail.com" }
@@ -78,6 +78,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["nanobanana_mcp_server"]
+
+[tool.hatch.build.targets.sdist]
+exclude = ["/.claude", "/.env"]
 
 [tool.ruff]
 target-version = "py311"
