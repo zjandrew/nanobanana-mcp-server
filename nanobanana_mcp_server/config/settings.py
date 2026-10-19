@@ -29,8 +29,10 @@ class AuthMethod(Enum):
 class ThinkingLevel(str, Enum):
     """Gemini 3 thinking levels for advanced reasoning."""
 
-    LOW = "low"  # Minimal latency, less reasoning
-    HIGH = "high"  # Maximum reasoning (default for Pro)
+    MINIMAL = "minimal"  # Lowest latency (Nano Banana 2.1)
+    LOW = "low"  # Legacy alias; Nano Banana 2.1 rejects it, so it is sent as MINIMAL
+    MEDIUM = "medium"  # Nano Banana 2.1 API default
+    HIGH = "high"  # Maximum reasoning
 
 
 class MediaResolution(str, Enum):
@@ -156,7 +158,7 @@ class ProImageConfig(BaseModelConfig):
     supports_grounding: bool = True
     supports_media_resolution: bool = True
     supports_extreme_aspect_ratios: bool = False
-    enable_search_grounding: bool = True
+    enable_search_grounding: bool = False  # Opt-in: adds a Google Search call per request
     request_timeout: int = 90  # Pro model needs more time for 4K
 
 
@@ -165,8 +167,9 @@ class NanoBanana2Config(ProImageConfig):
     """Nano Banana 2.1 configuration (Flash speed + Pro quality)."""
 
     model_name: str = "gemini-nano-banana-2.1"
+    default_thinking_level: ThinkingLevel = ThinkingLevel.MEDIUM  # Matches the API default
     request_timeout: int = 60  # Flash-speed model
-    supports_thinking: bool = True  # Supports Minimal/High/Dynamic thinking
+    supports_thinking: bool = True  # Supports minimal/medium/high thinking
     supports_extreme_aspect_ratios: bool = True  # 4:1, 1:4, 8:1, 1:8
 
 

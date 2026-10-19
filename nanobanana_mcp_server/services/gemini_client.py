@@ -186,6 +186,15 @@ class GeminiClient:
                 if image_config_kwargs:
                     config_kwargs["image_config"] = gx.ImageConfig(**image_config_kwargs)
 
+                # Grounding with Google Search (Pro and NB2 only)
+                if (
+                    config
+                    and config.get("enable_grounding")
+                    and getattr(self.gemini_config, "supports_grounding", False)
+                ):
+                    config_kwargs["tools"] = [gx.Tool(google_search=gx.GoogleSearch())]
+                    self.logger.info("Grounding with Google Search enabled")
+
                 # Merge filtered config parameters (excluding image_config related ones)
                 config_kwargs.update(filtered_config)
 
@@ -238,14 +247,18 @@ class GeminiClient:
         # NB2-specific parameters
         if isinstance(self.gemini_config, NanoBanana2Config):
             if "thinking_level" in config:
+                level = config["thinking_level"].upper()
+                # Nano Banana 2.1 supports minimal/medium/high and rejects LOW
+                if level == "LOW":
+                    level = "MINIMAL"
                 filtered["thinking_config"] = gx.ThinkingConfig(
-                    thinking_level=gx.ThinkingLevel[config["thinking_level"].upper()]
+                    thinking_level=gx.ThinkingLevel[level]
                 )
 
         # Pro-specific parameters - thinking_level is NOT supported by gemini-3-pro-image
         elif isinstance(self.gemini_config, ProImageConfig):
             # Resolution is handled via ImageConfig.image_size, not here
-            # Grounding is controlled via prompt/system instructions
+            # Grounding is handled via tools in generate_content
             if "thinking_level" in config:
                 self.logger.info(
                     "Note: thinking_level is not supported by gemini-3-pro-image, ignoring"
@@ -280,6 +293,27 @@ class GeminiClient:
                 images.append(inline_data.data)
 
         return images
+
+    def extract_grounding(self, response) -> dict[str, Any] | None:
+        """Extract Google Search queries and web sources from a grounded response."""
+        candidates = getattr(response, "candidates", None)
+        if not candidates:
+            return None
+
+        grounding_metadata = getattr(candidates[0], "grounding_metadata", None)
+        if not grounding_metadata:
+            return None
+
+        queries = list(getattr(grounding_metadata, "web_search_queries", None) or [])
+        sources = []
+        for chunk in getattr(grounding_metadata, "grounding_chunks", None) or []:
+            web = getattr(chunk, "web", None)
+            if web and getattr(web, "uri", None):
+                sources.append({"title": getattr(web, "title", None), "uri": web.uri})
+
+        if not queries and not sources:
+            return None
+        return {"search_queries": queries, "sources": sources}
 
     def upload_file(self, file_path: str, _display_name: str | None = None):
         """Upload file to Gemini Files API.

@@ -268,7 +268,8 @@ Nano Banana supports three Gemini models with intelligent automatic selection:
 - **Resolution**: Up to 4K (3840px)
 - **Speed**: ~2-4 seconds per image (Flash-class latency)
 - **Special Features**:
-  - 🌐 **Google Search Grounding**: Real-world knowledge for factually accurate images
+  - 🧠 **Thinking Levels**: `minimal` (fastest), `medium` (default), `high` (complex compositions)
+  - 🌐 **Google Search Grounding** (opt-in, `enable_grounding=True`): live search results for current or factual subjects
   - 🎯 **Subject Consistency**: Up to 5 characters and 14 objects per scene
   - ✍️ **Precision Text Rendering**: Clear, well-placed text in images
 - **Best for**: Almost everything — production assets, marketing, photography, text overlays
@@ -282,8 +283,8 @@ Nano Banana supports three Gemini models with intelligent automatic selection:
 - **Resolution**: Up to 4K (3840px)
 - **Speed**: ~5-8 seconds per image
 - **Special Features**:
-  - 🧠 **Advanced Reasoning**: Configurable thinking levels (LOW/HIGH)
-  - 🌐 **Google Search Grounding**: Real-world knowledge integration
+  - 🧠 **Advanced Reasoning**: Built-in thinking, always on (`thinking_level` is not configurable for Pro)
+  - 🌐 **Google Search Grounding** (opt-in, `enable_grounding=True`): live search results with cited sources
   - 📐 **Media Resolution Control**: Fine-tune vision processing detail
 - **Best for**: Complex narrative scenes, intricate compositions, maximum reasoning required
 - **model_tier**: `"pro"`
@@ -304,7 +305,7 @@ By default, the server uses **AUTO** mode which routes to **NB2** unless Pro's d
 **Pro Model Selected When**:
 
 - Strong quality keywords: "4K", "professional", "production", "high-res", "HD"
-- High thinking level requested: `thinking_level="HIGH"`
+- High thinking level requested: `thinking_level="high"`
 - Multi-image conditioning with multiple input images
 
 **NB2 Model Selected When** (default):
@@ -326,16 +327,29 @@ generate_image(
     prompt="Product photo on white background",
     model_tier="nb2",              # Nano Banana 2.1 (Flash speed + 4K)
     resolution="4k",
-    enable_grounding=True
+    thinking_level="high"          # minimal / medium (default) / high
+)
+
+# Ground the image in live Google Search results (opt-in)
+generate_image(
+    prompt="An infographic of this week's weather forecast in Tokyo",
+    model_tier="nb2",
+    enable_grounding=True          # Search queries and sources are returned in the result
+)
+
+# Edit an existing image; output keeps the source size unless you ask otherwise
+generate_image(
+    prompt="Place this product on a marble kitchen counter",
+    input_image_path_1="/path/to/product.png",
+    aspect_ratio="1:1",            # Change the canvas shape
+    resolution="2k"                # Explicit 1k / 2k / 4k
 )
 
 # Leverage Nano Banana Pro for complex reasoning
 generate_image(
     prompt="Cinematic scene: three characters in a tense standoff at dusk",
-    model_tier="pro",              # Pro for deep reasoning
-    resolution="4k",
-    thinking_level="HIGH",         # Enhanced reasoning
-    enable_grounding=True
+    model_tier="pro",              # Pro for deep reasoning (thinking always on)
+    resolution="4k"
 )
 
 # Legacy Flash for high-volume drafts

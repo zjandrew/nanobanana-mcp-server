@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-10-19
+
+### Fixed
+- **NB2 thinking levels**: `thinking_level="low"` returned `400 Thinking level LOW is not supported` on Nano Banana 2.1. It is now sent as `minimal`, and `minimal`, `medium` and `high` are accepted. An invalid value falls back to the model default instead of `high`.
+- **Google Search grounding**: `enable_grounding` only added a sentence to the prompt. It now sends the Google Search tool to NB2 and Pro, and the search queries and sources are returned in the result (`grounding` in structured content and in each image's metadata).
+- **NB2/Pro edits**: `aspect_ratio`, `resolution`, `negative_prompt` and `enable_grounding` were dropped in edit mode. They are now applied. The output keeps the source image's size unless `1k`, `2k` or `4k` is given.
+
+### Changed
+- **`enable_grounding` defaults to `false`**: real grounding adds a search call and latency per request, so it is opt-in.
+- **NB2 default thinking level is `medium`** (the API default), down from `high`.
+
 ## [0.4.8] - 2026-10-19
 
 ### Fixed

@@ -259,3 +259,99 @@ def test_generate_mode_nb2_routes_thinking_and_extreme_aspect_ratio(monkeypatch,
     assert result.structured_content["model_tier"] == "nb2"
     assert result.structured_content["thinking_level"] == "high"
     assert result.structured_content["aspect_ratio"] == "4:1"
+
+
+def _patch_nb2(monkeypatch):
+    from nanobanana_mcp_server.config.settings import ModelTier
+
+    nb2_service = _FakeProLikeService()
+    model_selector = _FakeModelSelector(
+        selected_service=nb2_service,
+        selected_tier=ModelTier.NB2,
+        model_id="gemini-nano-banana-2.1",
+        name="Nano Banana 2.1",
+    )
+    monkeypatch.setattr("nanobanana_mcp_server.services.get_model_selector", lambda: model_selector)
+    monkeypatch.setattr(
+        "nanobanana_mcp_server.tools.generate_image._get_enhanced_image_service",
+        lambda: _FakeEnhancedImageService(),
+    )
+    return nb2_service
+
+
+@pytest.mark.unit
+def test_edit_mode_nb2_forwards_aspect_ratio_resolution_and_grounding(monkeypatch, tmp_path):
+    gen_fn = _get_generate_image_fn()
+    nb2_service = _patch_nb2(monkeypatch)
+
+    src = tmp_path / "src.png"
+    src.write_bytes(b"x")
+
+    result = gen_fn(
+        prompt="turn this into a wide banner",
+        mode="edit",
+        model_tier="nb2",
+        input_image_path_1=str(src),
+        aspect_ratio="16:9",
+        resolution="2k",
+        negative_prompt="watermarks",
+        enable_grounding=True,
+        output_path=str(tmp_path / "out.png"),
+    )
+
+    edit_kwargs = nb2_service.calls[0][1]
+    assert nb2_service.calls[0][0] == "edit"
+    assert edit_kwargs["aspect_ratio"] == "16:9"
+    assert edit_kwargs["resolution"] == "2k"
+    assert edit_kwargs["negative_prompt"] == "watermarks"
+    assert edit_kwargs["enable_grounding"] is True
+    assert result.structured_content["aspect_ratio"] == "16:9"
+
+
+@pytest.mark.unit
+def test_low_thinking_level_is_normalized_to_minimal(monkeypatch, tmp_path):
+    gen_fn = _get_generate_image_fn()
+    nb2_service = _patch_nb2(monkeypatch)
+
+    result = gen_fn(
+        prompt="a quick sketch of a banana",
+        mode="generate",
+        model_tier="nb2",
+        thinking_level="low",
+        output_path=str(tmp_path) + os.sep,
+    )
+
+    assert nb2_service.calls[0][1]["thinking_level"].value == "minimal"
+    assert result.structured_content["thinking_level"] == "minimal"
+
+
+@pytest.mark.unit
+def test_invalid_thinking_level_falls_back_to_model_default(monkeypatch, tmp_path):
+    gen_fn = _get_generate_image_fn()
+    nb2_service = _patch_nb2(monkeypatch)
+
+    gen_fn(
+        prompt="a banana",
+        mode="generate",
+        model_tier="nb2",
+        thinking_level="extreme",
+        output_path=str(tmp_path) + os.sep,
+    )
+
+    assert nb2_service.calls[0][1]["thinking_level"] is None
+
+
+@pytest.mark.unit
+def test_grounding_is_off_by_default(monkeypatch, tmp_path):
+    gen_fn = _get_generate_image_fn()
+    nb2_service = _patch_nb2(monkeypatch)
+
+    result = gen_fn(
+        prompt="a banana",
+        mode="generate",
+        model_tier="nb2",
+        output_path=str(tmp_path) + os.sep,
+    )
+
+    assert nb2_service.calls[0][1]["enable_grounding"] is False
+    assert result.structured_content["grounding_enabled"] is False

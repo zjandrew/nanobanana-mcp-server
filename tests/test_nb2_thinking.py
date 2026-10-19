@@ -27,6 +27,16 @@ def test_nb2_thinking_level_becomes_thinking_config():
 
 
 @pytest.mark.unit
+def test_nb2_low_thinking_level_is_sent_as_minimal():
+    client = _build_client(NanoBanana2Config())
+
+    client.generate_content(contents=["test prompt"], config={"thinking_level": "low"})
+
+    sent_config = client._client.models.generate_content.call_args.kwargs["config"]
+    assert sent_config.thinking_config.thinking_level == gx.ThinkingLevel.MINIMAL
+
+
+@pytest.mark.unit
 def test_pro_thinking_level_is_still_ignored():
     client = _build_client(ProImageConfig())
 

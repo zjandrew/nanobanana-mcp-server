@@ -69,7 +69,7 @@ class ProImageService:
             resolution: Output resolution ('high', '4k', '2k', '1k')
             aspect_ratio: Output aspect ratio (e.g., '1:1', '16:9', '4:5')
             output_path: Optional output path for saving images
-            thinking_level: Reasoning depth (LOW or HIGH)
+            thinking_level: Reasoning depth (MINIMAL, MEDIUM or HIGH; NB2 only)
             enable_grounding: Enable Google Search grounding
             media_resolution: Vision processing detail level
             negative_prompt: Optional constraints to avoid
@@ -116,12 +116,6 @@ class ProImageService:
             # System instruction (optional)
             if system_instruction:
                 contents.append(system_instruction)
-            elif enable_grounding:
-                # Add grounding hint for Pro model
-                contents.append(
-                    "Use real-world knowledge and current information "
-                    "to create accurate, detailed images."
-                )
 
             # Enhanced prompt for Pro model
             enhanced_prompt = self._enhance_prompt_for_pro(prompt, resolution, negative_prompt)
@@ -155,9 +149,8 @@ class ProImageService:
                     }
                     if self.config.supports_thinking:
                         gen_config["thinking_level"] = thinking_level.value
-
-                    # Grounding is controlled via prompt/system instruction
-                    # not as a direct API parameter
+                    if enable_grounding and self.config.supports_grounding:
+                        gen_config["enable_grounding"] = True
 
                     response = self.gemini_client.generate_content(
                         contents,
@@ -165,6 +158,9 @@ class ProImageService:
                         aspect_ratio=aspect_ratio,
                     )
                     images = self.gemini_client.extract_images(response)
+                    grounding = (
+                        self.gemini_client.extract_grounding(response) if enable_grounding else None
+                    )
 
                     for j, image_bytes in enumerate(images):
                         # Pro metadata
@@ -184,6 +180,7 @@ class ProImageService:
                                 else None
                             ),
                             "grounding_enabled": enable_grounding,
+                            "grounding": grounding,
                             "mime_type": f"image/{self.config.default_image_format}",
                             "synthid_watermark": True,
                             "prompt": prompt,
@@ -331,6 +328,10 @@ class ProImageService:
         output_path: str | None = None,
         thinking_level: ThinkingLevel | None = None,
         media_resolution: MediaResolution | None = None,
+        aspect_ratio: str | None = None,
+        resolution: str | None = None,
+        negative_prompt: str | None = None,
+        enable_grounding: bool | None = None,
         use_storage: bool = True,
     ) -> tuple[list[MCPImage], list[dict[str, Any]]]:
         """
@@ -339,11 +340,25 @@ class ProImageService:
         Input can be provided as either:
         - Inline image bytes (base_image_b64 + mime_type)
         - Files API reference (file_data_part = {file_data:{mime_type, uri}})
+
+        Output size follows the source image unless aspect_ratio or an explicit
+        resolution ('1k', '2k', '4k') is given.
         """
         if thinking_level is None:
             thinking_level = self.config.default_thinking_level
         if media_resolution is None:
             media_resolution = self.config.default_media_resolution
+        if enable_grounding is None:
+            enable_grounding = self.config.enable_search_grounding
+
+        # Only an explicit size overrides the source image's size
+        image_size = resolution if resolution and resolution.lower() in ("1k", "2k", "4k") else None
+
+        if aspect_ratio:
+            validate_aspect_ratio_string(
+                aspect_ratio,
+                allow_extreme=self.config.supports_extreme_aspect_ratios,
+            )
 
         with ProgressContext(
             "pro_image_editing",
@@ -368,6 +383,8 @@ class ProImageService:
                 "Maintain the original image's quality and style. "
                 "Make precise, high-quality edits."
             )
+            if negative_prompt:
+                enhanced_instruction += f"\n\nAvoid: {negative_prompt}"
 
             # Build contents: prefer file_data when available to avoid base64 transfer.
             if file_data_part:
@@ -389,9 +406,16 @@ class ProImageService:
                 gen_config["thinking_level"] = thinking_level.value
             if self.config.supports_media_resolution:
                 gen_config["media_resolution"] = media_resolution.value
+            if image_size:
+                gen_config["resolution"] = image_size
+            if enable_grounding and self.config.supports_grounding:
+                gen_config["enable_grounding"] = True
 
-            response = self.gemini_client.generate_content(contents, config=gen_config)
+            response = self.gemini_client.generate_content(
+                contents, config=gen_config, aspect_ratio=aspect_ratio
+            )
             image_bytes_list = self.gemini_client.extract_images(response)
+            grounding = self.gemini_client.extract_grounding(response) if enable_grounding else None
 
             progress.update(70, "Processing edited image(s)...")
 
@@ -417,6 +441,11 @@ class ProImageService:
                     "result_mime_type": f"image/{self.config.default_image_format}",
                     "synthid_watermark": True,
                     "edit_index": edit_index,
+                    "aspect_ratio": aspect_ratio,
+                    "resolution": image_size,
+                    "negative_prompt": negative_prompt,
+                    "grounding_enabled": enable_grounding,
+                    "grounding": grounding,
                 }
 
                 if output_path:

@@ -85,25 +85,28 @@ def register_generate_image_tool(server: FastMCP):
         resolution: Annotated[
             str | None,
             Field(
-                description="Output resolution: 'high', '4k', '2k', '1k'. "
-                "4K and 2K available with 'nb2' and 'pro' models. Default: 'high'."
+                description="Output resolution: '1k', '2k', '4k', or 'high' (= 1k). "
+                "2K and 4K available with 'nb2' and 'pro' models. In edit mode the output "
+                "keeps the source image's size unless '1k', '2k' or '4k' is given. Default: 'high'."
             ),
         ] = "high",
         thinking_level: Annotated[
             str | None,
             Field(
-                description="Reasoning depth hint: 'low' (faster), 'high' (better quality). "
-                "Applied to the 'nb2' model; 'high' also biases auto-selection toward Pro. "
-                "Default: None (auto)."
+                description="Reasoning depth for the 'nb2' model: 'minimal' (fastest), "
+                "'medium' (default), or 'high' (best for complex compositions). "
+                "'low' is accepted as an alias for 'minimal'. "
+                "'high' also biases auto-selection toward Pro. Default: None (model default)."
             ),
         ] = None,
         enable_grounding: Annotated[
             bool,
             Field(
-                description="Enable Google Search grounding for factual accuracy (NB2 and Pro models). "
-                "Useful for real-world subjects. Default: true."
+                description="Ground the image in live Google Search results (NB2 and Pro models). "
+                "Use for current or factual subjects such as weather, events, charts, or real "
+                "places. Adds latency and search cost. Default: false."
             ),
-        ] = True,
+        ] = False,
         aspect_ratio: Annotated[
             Literal[
                 "1:1",
@@ -197,13 +200,18 @@ def register_generate_image_tool(server: FastMCP):
                 logger.warning(f"Invalid model_tier '{model_tier}', defaulting to AUTO")
                 tier = ModelTier.AUTO
 
-            # Validate thinking level for Pro model
-            try:
-                if thinking_level:
+            # Normalize thinking level ('low' is a legacy alias for 'minimal')
+            if thinking_level:
+                thinking_level = thinking_level.strip().lower()
+                if thinking_level == ThinkingLevel.LOW.value:
+                    thinking_level = ThinkingLevel.MINIMAL.value
+                try:
                     _ = ThinkingLevel(thinking_level)  # Just validate
-            except ValueError:
-                logger.warning(f"Invalid thinking_level '{thinking_level}', defaulting to HIGH")
-                thinking_level = "high"
+                except ValueError:
+                    logger.warning(
+                        f"Invalid thinking_level '{thinking_level}', using the model default"
+                    )
+                    thinking_level = None
 
             # Get model selector to determine which model to use
             from ..services import get_model_selector
@@ -293,6 +301,10 @@ def register_generate_image_tool(server: FastMCP):
                                 if (thinking_level and selected_tier == ModelTier.NB2)
                                 else None
                             ),
+                            aspect_ratio=aspect_ratio,
+                            resolution=resolution,
+                            negative_prompt=negative_prompt,
+                            enable_grounding=enable_grounding,
                             use_storage=True,
                         )
                         for meta in metadata:
@@ -326,6 +338,10 @@ def register_generate_image_tool(server: FastMCP):
                                 if (thinking_level and selected_tier == ModelTier.NB2)
                                 else None
                             ),
+                            aspect_ratio=aspect_ratio,
+                            resolution=resolution,
+                            negative_prompt=negative_prompt,
+                            enable_grounding=enable_grounding,
                             use_storage=True,
                         )
                         for meta in metadata:
@@ -429,6 +445,7 @@ def register_generate_image_tool(server: FastMCP):
                     ).strip().lower() in ("true", "1", "yes")
 
             # Create response with file paths and thumbnails
+            grounding = None
             if metadata:
                 # Filter out any None entries from metadata, keeping thumbnail_images aligned
                 filtered_pairs = [
@@ -487,6 +504,13 @@ def register_generate_image_tool(server: FastMCP):
                 action_verb = "Edited" if detected_mode == "edit" else "Generated"
                 model_name = model_info["name"]
                 model_emoji = model_info["emoji"]
+                if selected_tier == ModelTier.NB2 and not thinking_level:
+                    # Report the level the service actually used (model default)
+                    thinking_level = next(
+                        (m.get("thinking_level") for m in metadata if m.get("thinking_level")),
+                        None,
+                    )
+                grounding = next((m.get("grounding") for m in metadata if m.get("grounding")), None)
                 summary_lines = [
                     f"✅ {action_verb} {len(metadata)} image(s) with {model_emoji} {model_name}.",
                     f"📊 **Model**: {selected_tier.value.upper()} tier",
@@ -505,6 +529,14 @@ def register_generate_image_tool(server: FastMCP):
                         summary_lines.append("🔍 **Grounding**: Enabled (Google Search)")
                     if aspect_ratio in ("4:1", "1:4", "8:1", "1:8"):
                         summary_lines.append(f"📐 **Extreme Aspect Ratio**: {aspect_ratio}")
+                if grounding:
+                    if grounding.get("search_queries"):
+                        queries = ", ".join(grounding["search_queries"])
+                        summary_lines.append(f"🔎 **Search queries**: {queries}")
+                    for source in grounding.get("sources", [])[:5]:
+                        summary_lines.append(
+                            f"   • {source.get('title') or source['uri']}: {source['uri']}"
+                        )
                 summary_lines.append("")  # Blank line
 
                 # Add source information based on mode and inputs
@@ -517,7 +549,7 @@ def register_generate_image_tool(server: FastMCP):
                     summary_lines.append(
                         f"🖼️ Conditioned on {len(input_image_paths)} input image(s): {', '.join(input_image_paths)}"
                     )
-                if aspect_ratio and detected_mode == "generate":
+                if aspect_ratio:
                     summary_lines.append(f"📐 Aspect ratio: {aspect_ratio}")
 
                 # Add file information
@@ -577,6 +609,7 @@ def register_generate_image_tool(server: FastMCP):
                 "grounding_enabled": enable_grounding
                 if selected_tier in (ModelTier.PRO, ModelTier.NB2)
                 else False,
+                "grounding": grounding,
                 "requested": n,
                 "returned": len(thumbnail_images),
                 "negative_prompt_applied": bool(negative_prompt),
