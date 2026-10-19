@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.8] - 2026-10-19
+
+### Fixed
+- **Model naming for MCP clients**: Server instructions and the `model_tier` description now name each tier's model (`nb2` = Nano Banana 2.1 / `gemini-nano-banana-2.1`, `pro` = Nano Banana Pro / `gemini-3-pro-image`, `flash` = Nano Banana / `gemini-2.5-flash-image`). Clients previously saw only "Nano Banana 2 (Gemini 3.1 Flash Image)" and reported that no 2.1 option existed.
+
 ## [0.4.7] - 2026-10-19
 
 ### Changed

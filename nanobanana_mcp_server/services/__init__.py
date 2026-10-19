@@ -93,7 +93,7 @@ def initialize_services(server_config: ServerConfig, gemini_config: GeminiConfig
     # Create Pro image service (Flash uses existing _file_image_service)
     _pro_image_service = ProImageService(_pro_gemini_client, pro_config, _image_storage_service)
 
-    # Create NB2 image service (Gemini 3.1 Flash Image — Flash speed + Pro quality)
+    # Create NB2 image service (Nano Banana 2.1 — Flash speed + Pro quality)
     nb2_config = NanoBanana2Config()
     _nb2_gemini_client = GeminiClient(server_config, nb2_config)
     _nb2_image_service = ProImageService(_nb2_gemini_client, nb2_config, _image_storage_service)
@@ -178,7 +178,7 @@ def get_pro_image_service() -> ProImageService:
 
 
 def get_nb2_image_service() -> ProImageService:
-    """Get the Nano Banana 2 image service instance."""
+    """Get the Nano Banana 2.1 image service instance."""
     if _nb2_image_service is None:
         raise RuntimeError("Services not initialized. Call initialize_services() first.")
     return _nb2_image_service

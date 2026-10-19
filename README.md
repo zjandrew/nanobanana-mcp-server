@@ -19,7 +19,7 @@ A production-ready **Model Context Protocol (MCP)** server that provides AI-powe
 ## ✨ Features
 
 - 🎨 **Multi-Model AI Image Generation**: Three Gemini models with intelligent automatic selection
-- 🍌 **Gemini 3.1 Flash Image (NB2)**: Default model — 4K resolution at Flash speed with grounding
+- 🍌 **Nano Banana 2.1 (NB2)**: Default model — 4K resolution at Flash speed with grounding
 - 🏆 **Gemini 3 Pro Image**: Maximum reasoning depth for the most complex compositions
 - ⚡ **Gemini 2.5 Flash Image**: Legacy Flash model for high-volume rapid prototyping
 - 🤖 **Smart Model Selection**: Automatically routes to NB2 or Pro based on your prompt
@@ -260,7 +260,7 @@ python -m nanobanana_mcp_server.server
 
 Nano Banana supports three Gemini models with intelligent automatic selection:
 
-### 🍌 NB2 — Nano Banana 2 (Gemini 3.1 Flash Image) ⭐ DEFAULT
+### 🍌 NB2 — Nano Banana 2.1 (gemini-nano-banana-2.1) ⭐ DEFAULT
 
 **Flash speed with Pro-level quality — the best of both worlds**
 
@@ -324,7 +324,7 @@ By default, the server uses **AUTO** mode which routes to **NB2** unless Pro's d
 # Explicit NB2 selection
 generate_image(
     prompt="Product photo on white background",
-    model_tier="nb2",              # Nano Banana 2 (Flash speed + 4K)
+    model_tier="nb2",              # Nano Banana 2.1 (Flash speed + 4K)
     resolution="4k",
     enable_grounding=True
 )

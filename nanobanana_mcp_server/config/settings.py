@@ -14,7 +14,7 @@ class ModelTier(str, Enum):
 
     FLASH = "flash"  # Speed-optimized (Gemini 2.5 Flash)
     PRO = "pro"  # Quality-optimized (Gemini 3 Pro)
-    NB2 = "nb2"  # Nano Banana 2 (Gemini 3.1 Flash Image — Flash speed + Pro quality)
+    NB2 = "nb2"  # Nano Banana 2.1 (Flash speed + Pro quality)
     AUTO = "auto"  # Automatic selection
 
 

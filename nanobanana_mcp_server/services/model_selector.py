@@ -29,7 +29,7 @@ class ModelSelector:
         Args:
             flash_service: Gemini 2.5 Flash Image service (speed-optimized)
             pro_service: Gemini 3 Pro Image service (quality-optimized)
-            nb2_service: Gemini 3.1 Flash Image service (Flash speed + Pro quality)
+            nb2_service: Nano Banana 2.1 service (Flash speed + Pro quality)
             selection_config: Selection strategy configuration
         """
         self.flash_service = flash_service
@@ -62,7 +62,7 @@ class ModelSelector:
             return self.pro_service, ModelTier.PRO
 
         if requested_tier == ModelTier.NB2:
-            self.logger.info("Explicit Nano Banana 2 model selection")
+            self.logger.info("Explicit Nano Banana 2.1 model selection")
             return self.nb2_service, ModelTier.NB2
 
         # Auto selection logic

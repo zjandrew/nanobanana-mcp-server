@@ -75,8 +75,10 @@ def register_generate_image_tool(server: FastMCP):
         model_tier: Annotated[
             str | None,
             Field(
-                description="Model tier: 'flash' (legacy, 1024px), 'nb2' (4K at Flash speed, default), "
-                "'pro' (max quality, 4K), or 'auto' (smart selection). "
+                description="Model tier: 'flash' (legacy Nano Banana, gemini-2.5-flash-image, 1024px), "
+                "'nb2' (Nano Banana 2.1, gemini-nano-banana-2.1, 4K at Flash speed, default), "
+                "'pro' (Nano Banana Pro, gemini-3-pro-image, max quality, 4K), "
+                "or 'auto' (smart selection). "
                 "Default: 'auto' - automatically selects nb2 or pro based on prompt."
             ),
         ] = "auto",
