@@ -12,7 +12,7 @@ from nanobanana_mcp_server.config.settings import (
     ThinkingLevel,
 )
 from nanobanana_mcp_server.core.exceptions import ValidationError
-from nanobanana_mcp_server.services.gemini_client import GeminiClient
+from nanobanana_mcp_server.services.gemini_client import GeminiClient, ImageResult
 from nanobanana_mcp_server.services.model_selector import ModelSelector
 from nanobanana_mcp_server.services.pro_image_service import ProImageService
 from tests.test_edit_routing import (
@@ -25,9 +25,9 @@ from tests.test_edit_routing import (
 
 def _build_service(model_config):
     gemini_client = Mock()
-    gemini_client.generate_content = Mock(return_value=Mock())
-    gemini_client.extract_images = Mock(return_value=[b"image-bytes"])
-    gemini_client.extract_grounding = Mock(return_value=None)
+    gemini_client.generate_image_result = Mock(
+        return_value=ImageResult(images=[b"image-bytes"], interaction_id="ix-1")
+    )
     gemini_client.create_image_parts = Mock(return_value=["image-part"])
     return ProImageService(gemini_client, model_config, storage_service=None), gemini_client
 
@@ -122,7 +122,7 @@ def test_lite_generate_uses_minimal_thinking_and_lite_label():
 
     _, metadata = service.generate_images(prompt="a banana", thinking_level=ThinkingLevel.MEDIUM)
 
-    gen_config = gemini_client.generate_content.call_args.kwargs["config"]
+    gen_config = gemini_client.generate_image_result.call_args.kwargs["config"]
     assert gen_config["thinking_level"] == "minimal"
     assert metadata[0]["model_tier"] == "lite"
     assert metadata[0]["thinking_level"] == "minimal"
@@ -137,7 +137,7 @@ def test_lite_rejects_2k_and_4k(resolution):
         service.generate_images(prompt="a banana", resolution=resolution)
     with pytest.raises(ValidationError, match="does not support"):
         service.edit_images("brighten", base_image_b64="aGVsbG8=", resolution=resolution)
-    gemini_client.generate_content.assert_not_called()
+    gemini_client.generate_image_result.assert_not_called()
 
 
 # --- Model selection -------------------------------------------------------

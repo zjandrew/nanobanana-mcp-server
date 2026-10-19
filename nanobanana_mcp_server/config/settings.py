@@ -61,6 +61,9 @@ class ServerConfig:
     gcp_project_id: str | None = None
     gcp_region: str = "global"
     gemini_base_url: str | None = None
+    # Route Gemini 3 image requests through the Interactions API so results can be
+    # continued with previous_interaction_id (API key auth on the default endpoint only)
+    use_interactions: bool = True
 
     @classmethod
     def from_env(cls) -> "ServerConfig":
@@ -122,6 +125,8 @@ class ServerConfig:
             image_output_dir=str(output_path),
             return_full_image=os.getenv("RETURN_FULL_IMAGE", "false").strip().lower()
             in ("true", "1", "yes"),
+            use_interactions=os.getenv("NANOBANANA_USE_INTERACTIONS", "true").strip().lower()
+            not in ("false", "0", "no"),
         )
 
 
@@ -162,8 +167,11 @@ class ProImageConfig(BaseModelConfig):
     supports_grounding: bool = True
     supports_media_resolution: bool = True
     supports_extreme_aspect_ratios: bool = False
+    supports_image_search: bool = False  # Google Image Search grounding
+    supports_video_input: bool = False
     enable_search_grounding: bool = False  # Opt-in: adds a Google Search call per request
     request_timeout: int = 90  # Pro model needs more time for 4K
+    video_request_timeout: int = 240  # Video context takes ~1 minute or more
 
     def resolve_thinking_level(self, level: ThinkingLevel | None) -> ThinkingLevel:
         """Map a requested thinking level onto one this model accepts."""
@@ -191,6 +199,8 @@ class NanoBanana2Config(ProImageConfig):
     request_timeout: int = 60  # Flash-speed model
     supports_thinking: bool = True
     supports_extreme_aspect_ratios: bool = True  # 4:1, 1:4, 8:1, 1:8
+    supports_image_search: bool = True
+    supports_video_input: bool = True
 
 
 @dataclass
@@ -213,6 +223,7 @@ class LiteImageConfig(ProImageConfig):
     supports_thinking: bool = True
     supports_grounding: bool = False
     supports_extreme_aspect_ratios: bool = True  # 4:1, 1:4, 8:1, 1:8
+    supports_video_input: bool = True
 
 
 @dataclass

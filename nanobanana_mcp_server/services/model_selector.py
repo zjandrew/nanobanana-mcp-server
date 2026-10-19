@@ -98,6 +98,19 @@ class ModelSelector:
         self.logger.warning(f"Unknown model tier '{requested_tier}', falling back to NB2")
         return self.nb2_service, ModelTier.NB2
 
+    def tier_for_interaction(self, interaction_id: str) -> ModelTier | None:
+        """Tier of the model that produced a stored interaction, if it is one of ours."""
+        model_name = self.nb2_service.gemini_client.get_interaction_model(interaction_id)
+        candidates = (
+            (ModelTier.NB2, self.nb2_service),
+            (ModelTier.PRO, self.pro_service),
+            (ModelTier.LITE, self.lite_service),
+        )
+        for tier, service in candidates:
+            if service is not None and service.config.model_name == model_name:
+                return tier
+        return None
+
     def _auto_select(self, prompt: str, **kwargs) -> ModelTier:
         """
         Automatic model selection based on prompt and context analysis.

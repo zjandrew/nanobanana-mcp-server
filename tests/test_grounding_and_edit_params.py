@@ -1,8 +1,8 @@
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-import pytest
 from google.genai import types as gx
+import pytest
 
 from nanobanana_mcp_server.config.settings import (
     FlashImageConfig,
@@ -10,7 +10,7 @@ from nanobanana_mcp_server.config.settings import (
     ProImageConfig,
     ServerConfig,
 )
-from nanobanana_mcp_server.services.gemini_client import GeminiClient
+from nanobanana_mcp_server.services.gemini_client import GeminiClient, ImageResult
 from nanobanana_mcp_server.services.pro_image_service import ProImageService
 
 GROUNDING = {
@@ -27,11 +27,11 @@ def _build_client(model_config):
     return client
 
 
-def _build_service(model_config):
+def _build_service(model_config, grounding=GROUNDING):
     gemini_client = Mock()
-    gemini_client.generate_content = Mock(return_value=Mock())
-    gemini_client.extract_images = Mock(return_value=[b"image-bytes"])
-    gemini_client.extract_grounding = Mock(return_value=GROUNDING)
+    gemini_client.generate_image_result = Mock(
+        return_value=ImageResult(images=[b"image-bytes"], grounding=grounding)
+    )
     gemini_client.create_image_parts = Mock(return_value=["image-part"])
     return ProImageService(gemini_client, model_config, storage_service=None), gemini_client
 
@@ -107,8 +107,8 @@ def test_generate_with_grounding_uses_tool_not_prompt_hint():
         prompt="today's weather in Tokyo as an infographic", enable_grounding=True
     )
 
-    contents = gemini_client.generate_content.call_args.args[0]
-    gen_config = gemini_client.generate_content.call_args.kwargs["config"]
+    contents = gemini_client.generate_image_result.call_args.args[0]
+    gen_config = gemini_client.generate_image_result.call_args.kwargs["config"]
     assert gen_config["enable_grounding"] is True
     assert not any("real-world knowledge" in str(part) for part in contents)
     assert metadata[0]["grounding"] == GROUNDING
@@ -116,13 +116,12 @@ def test_generate_with_grounding_uses_tool_not_prompt_hint():
 
 @pytest.mark.unit
 def test_generate_without_grounding_skips_search():
-    service, gemini_client = _build_service(NanoBanana2Config())
+    service, gemini_client = _build_service(NanoBanana2Config(), grounding=None)
 
     _, metadata = service.generate_images(prompt="a banana")
 
-    gen_config = gemini_client.generate_content.call_args.kwargs["config"]
+    gen_config = gemini_client.generate_image_result.call_args.kwargs["config"]
     assert "enable_grounding" not in gen_config
-    gemini_client.extract_grounding.assert_not_called()
     assert metadata[0]["grounding"] is None
 
 
@@ -132,7 +131,7 @@ def test_nb2_default_thinking_level_is_medium():
 
     service.generate_images(prompt="a banana")
 
-    gen_config = gemini_client.generate_content.call_args.kwargs["config"]
+    gen_config = gemini_client.generate_image_result.call_args.kwargs["config"]
     assert gen_config["thinking_level"] == "medium"
 
 
@@ -148,8 +147,8 @@ def test_edit_forwards_aspect_ratio_size_and_negative_prompt():
         negative_prompt="text",
     )
 
-    contents = gemini_client.generate_content.call_args.args[0]
-    call_kwargs = gemini_client.generate_content.call_args.kwargs
+    contents = gemini_client.generate_image_result.call_args.args[0]
+    call_kwargs = gemini_client.generate_image_result.call_args.kwargs
     assert call_kwargs["aspect_ratio"] == "16:9"
     assert call_kwargs["config"]["resolution"] == "2k"
     assert contents[-1].endswith("Avoid: text")
@@ -163,6 +162,6 @@ def test_edit_keeps_source_size_for_default_resolution():
 
     service.edit_images("brighten", base_image_b64="aGVsbG8=", resolution="high")
 
-    call_kwargs = gemini_client.generate_content.call_args.kwargs
+    call_kwargs = gemini_client.generate_image_result.call_args.kwargs
     assert "resolution" not in call_kwargs["config"]
     assert call_kwargs["aspect_ratio"] is None

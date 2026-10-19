@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-10-19
+
+### Added
+- **Multi-turn editing**: NB2, Pro and Lite requests go through the Gemini Interactions API, and every result returns an `interaction_id`. Pass it back as `previous_interaction_id` with just the change ("make the umbrella yellow"); the model keeps the conversation context. With `model_tier="auto"` the follow-up reuses the previous result's model. Follow-up prompts are sent as written, and the output keeps the previous size unless `1k`/`2k`/`4k` is given.
+- **Google Image Search grounding** (`image_search=True`, NB2 only): grounds on image results as well as web results and returns image search queries, image sources, and the search suggestions Google requires to be shown. Runs on `generate_content`, because the Interactions API returns image search as an unexecuted function call; these results have no `interaction_id`.
+- **Video to image** (`input_video_url`, NB2 and Lite): uses a public YouTube video as context, with a 240s request timeout (calls take about 45–75s).
+- Grounded results include `search_suggestions_html` when the API returns it.
+
+### Changed
+- **google-genai 2.31** (was 1.59).
+- **`NANOBANANA_USE_INTERACTIONS`** (default `true`): set to `false` to keep everything on `generate_content`. Vertex AI and `GEMINI_BASE_URL` always use `generate_content`, so multi-turn editing needs API key auth on the default endpoint. Google stores Interactions conversations so they can be continued.
+- Grounding over the Interactions API forces the search (`tool_choice: "any"`): without it the image models skipped the search in 6 of 6 test runs. Pro results grounded this way carry search queries but no source links, since the API only attaches citations to text output.
+
 ## [0.6.0] - 2026-10-19
 
 ### Added

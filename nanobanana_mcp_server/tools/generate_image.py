@@ -73,6 +73,23 @@ def register_generate_image_tool(server: FastMCP):
                 max_length=MAX_INPUT_IMAGES,
             ),
         ] = None,
+        input_video_url: Annotated[
+            str | None,
+            Field(
+                description="Public YouTube video URL to use as visual context, e.g. for a "
+                "poster or thumbnail ('nb2' and 'lite' only; auto picks 'nb2'). "
+                "Takes about 1 minute or more."
+            ),
+        ] = None,
+        previous_interaction_id: Annotated[
+            str | None,
+            Field(
+                description="Continue editing an earlier result: pass the interaction_id it "
+                "returned and describe only the change (e.g. 'make the banana blue'). The "
+                "model keeps the full context of that conversation. With model_tier 'auto' "
+                "the same model is reused. Not available for 'flash' or with image_search."
+            ),
+        ] = None,
         file_id: Annotated[
             str | None,
             Field(
@@ -124,6 +141,14 @@ def register_generate_image_tool(server: FastMCP):
                 description="Ground the image in live Google Search results ('nb2' and 'pro' only). "
                 "Use for current or factual subjects such as weather, events, charts, or real "
                 "places. Adds latency and search cost. Default: false."
+            ),
+        ] = False,
+        image_search: Annotated[
+            bool,
+            Field(
+                description="Also ground on Google Image Search results, for subjects whose "
+                "look matters (a specific species, landmark or product). 'nb2' only; implies "
+                "enable_grounding. Results cannot be continued with previous_interaction_id."
             ),
         ] = False,
         aspect_ratio: Annotated[
@@ -205,13 +230,37 @@ def register_generate_image_tool(server: FastMCP):
             # Validate output_path if provided
             validate_output_path(output_path)
 
+            # A follow-up turn edits the previous result through the generation path
+            conversational = bool(previous_interaction_id)
+            if conversational and file_id:
+                raise ValidationError(
+                    "file_id cannot be combined with previous_interaction_id; "
+                    "pass extra images with input_image_paths"
+                )
+            if conversational and image_search:
+                raise ValidationError(
+                    "image_search cannot continue a previous interaction; "
+                    "start a new request without previous_interaction_id"
+                )
+
             # Auto-detect mode based on inputs
             detected_mode = mode
             if mode == "auto":
-                if file_id or (input_image_paths and len(input_image_paths) == 1):
+                if conversational:
+                    detected_mode = "edit"
+                elif input_video_url:
+                    detected_mode = "generate"
+                elif file_id or (input_image_paths and len(input_image_paths) == 1):
                     detected_mode = "edit"
                 else:
                     detected_mode = "generate"
+            if input_video_url and detected_mode == "edit" and not conversational:
+                raise ValidationError("input_video_url works in generate mode, not edit mode")
+
+            # Get model selector to determine which model to use
+            from ..services import get_model_selector
+
+            model_selector = get_model_selector()
 
             # Parse model tier
             try:
@@ -219,6 +268,16 @@ def register_generate_image_tool(server: FastMCP):
             except ValueError:
                 logger.warning(f"Invalid model_tier '{model_tier}', defaulting to AUTO")
                 tier = ModelTier.AUTO
+
+            if tier == ModelTier.AUTO:
+                if conversational:
+                    # Keep editing on the model that made the previous result
+                    tier = (
+                        model_selector.tier_for_interaction(previous_interaction_id)
+                        or ModelTier.AUTO
+                    )
+                elif image_search or input_video_url:
+                    tier = ModelTier.NB2  # The tier that supports both
 
             # Normalize thinking level ('low' is a legacy alias for 'minimal')
             if thinking_level:
@@ -232,11 +291,6 @@ def register_generate_image_tool(server: FastMCP):
                         f"Invalid thinking_level '{thinking_level}', using the model default"
                     )
                     thinking_level = None
-
-            # Get model selector to determine which model to use
-            from ..services import get_model_selector
-
-            model_selector = get_model_selector()
 
             # Select model based on prompt and parameters
             selected_service, selected_tier = model_selector.select_model(
@@ -258,6 +312,14 @@ def register_generate_image_tool(server: FastMCP):
             # Validation
             if mode not in ["auto", "generate", "edit"]:
                 raise ValidationError("Mode must be 'auto', 'generate', or 'edit'")
+            if conversational and selected_tier == ModelTier.FLASH:
+                raise ValidationError("previous_interaction_id is not supported by the flash tier")
+            if image_search and selected_tier != ModelTier.NB2:
+                raise ValidationError("image_search is only supported by model_tier='nb2'")
+            if input_video_url and selected_tier not in THINKING_TIERS:
+                raise ValidationError(
+                    "input_video_url is only supported by model_tier='nb2' or 'lite'"
+                )
 
             if input_image_paths:
                 max_images = MAX_INPUT_IMAGES_BY_TIER.get(selected_tier.value, MAX_INPUT_IMAGES)
@@ -278,7 +340,7 @@ def register_generate_image_tool(server: FastMCP):
                 input_image_paths = resolved_paths
 
             # Mode-specific validation
-            if detected_mode == "edit":
+            if detected_mode == "edit" and not conversational:
                 if not file_id and not input_image_paths:
                     raise ValidationError("Edit mode requires either file_id or input_image_paths")
                 if file_id and input_image_paths and len(input_image_paths) > 1:
@@ -290,7 +352,7 @@ def register_generate_image_tool(server: FastMCP):
             enhanced_image_service = _get_enhanced_image_service()
 
             # Execute based on detected mode
-            if detected_mode == "edit":
+            if detected_mode == "edit" and not conversational:
                 if selected_tier == ModelTier.FLASH:
                     # Flash edit path uses EnhancedImageService (workflows.md + Files API)
                     if file_id:
@@ -431,6 +493,9 @@ def register_generate_image_tool(server: FastMCP):
                         system_instruction=system_instruction,
                         input_images=input_images,
                         use_storage=True,
+                        previous_interaction_id=previous_interaction_id,
+                        image_search=image_search,
+                        input_video_url=input_video_url,
                     )
                 elif selected_tier in THINKING_TIERS:
                     # NB2 / Lite services (Flash speed, support thinking)
@@ -449,6 +514,9 @@ def register_generate_image_tool(server: FastMCP):
                         system_instruction=system_instruction,
                         input_images=input_images,
                         use_storage=True,
+                        previous_interaction_id=previous_interaction_id,
+                        image_search=image_search,
+                        input_video_url=input_video_url,
                     )
                 else:
                     # Use Flash service (via enhanced_image_service) for speed
@@ -570,6 +638,9 @@ def register_generate_image_tool(server: FastMCP):
                     if grounding.get("search_queries"):
                         queries = ", ".join(grounding["search_queries"])
                         summary_lines.append(f"🔎 **Search queries**: {queries}")
+                    if grounding.get("image_search_queries"):
+                        image_queries = ", ".join(grounding["image_search_queries"])
+                        summary_lines.append(f"🖼️ **Image search queries**: {image_queries}")
                     for source in grounding.get("sources", [])[:5]:
                         summary_lines.append(
                             f"   • {source.get('title') or source['uri']}: {source['uri']}"
@@ -577,6 +648,12 @@ def register_generate_image_tool(server: FastMCP):
                 summary_lines.append("")  # Blank line
 
                 # Add source information based on mode and inputs
+                if conversational:
+                    summary_lines.append(
+                        f"🔁 **Continued from interaction**: {previous_interaction_id}"
+                    )
+                if input_video_url:
+                    summary_lines.append(f"🎬 **Video context**: {input_video_url}")
                 if detected_mode == "edit":
                     if file_id:
                         summary_lines.append(f"📎 **Edit Source**: Files API {file_id}")
@@ -611,10 +688,18 @@ def register_generate_image_tool(server: FastMCP):
                             extra_info += f" • 🌐 Files API: {files_api_info['name']}"
                         if meta.get("parent_file_id"):
                             extra_info += f" • 👨‍👩‍👧 Parent: {meta.get('parent_file_id')}"
+                    if meta.get("interaction_id"):
+                        extra_info += f"\n     🔁 interaction_id: `{meta['interaction_id']}`"
 
                     summary_lines.append(
                         f"  {i}. `{full_path}`\n"
                         f"     📏 {width}x{height} • 💾 {size_mb}MB{extra_info}"
+                    )
+
+                if any(m.get("interaction_id") for m in metadata):
+                    summary_lines.append(
+                        "\n🔁 To keep editing an image, call again with "
+                        "previous_interaction_id set to its interaction_id and describe the change."
                     )
 
                 if effective_return_full_image:
@@ -647,6 +732,13 @@ def register_generate_image_tool(server: FastMCP):
                 if selected_tier in (ModelTier.PRO, ModelTier.NB2)
                 else False,
                 "grounding": grounding,
+                "image_search": image_search,
+                "input_video_url": input_video_url,
+                "previous_interaction_id": previous_interaction_id,
+                "interaction_id": next(
+                    (m.get("interaction_id") for m in metadata if m and m.get("interaction_id")),
+                    None,
+                ),
                 "requested": n,
                 "returned": len(thumbnail_images),
                 "negative_prompt_applied": bool(negative_prompt),

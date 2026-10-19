@@ -9,6 +9,7 @@ import os
 from typing import Any
 
 from fastmcp.utilities.types import Image as MCPImage
+from google.genai import types as gx
 from PIL import Image as PILImage
 
 from ..config.settings import MediaResolution, ProImageConfig, ThinkingLevel
@@ -59,9 +60,16 @@ class ProImageService:
         system_instruction: str | None = None,
         input_images: list[tuple[str, str]] | None = None,
         use_storage: bool = True,
+        previous_interaction_id: str | None = None,
+        image_search: bool = False,
+        input_video_url: str | None = None,
     ) -> tuple[list[MCPImage], list[dict[str, Any]]]:
         """
         Generate high-quality images using Gemini 3 Pro Image.
+
+        previous_interaction_id continues an earlier interaction (multi-turn editing),
+        image_search adds Google Image Search grounding (NB2 only), and
+        input_video_url uses a public video as visual context (NB2 and Lite only).
 
         Features:
         - Up to 4K resolution support
@@ -94,6 +102,12 @@ class ProImageService:
             media_resolution = self.config.default_media_resolution
 
         self._validate_image_size(resolution)
+        if image_search and not self.config.supports_image_search:
+            raise ValidationError(f"{self.config.model_name} does not support image_search")
+        if input_video_url and not self.config.supports_video_input:
+            raise ValidationError(f"{self.config.model_name} does not support video input")
+        if image_search:
+            enable_grounding = True
 
         # Validate aspect_ratio if provided
         if aspect_ratio:
@@ -124,8 +138,14 @@ class ProImageService:
             if system_instruction:
                 contents.append(system_instruction)
 
-            # Enhanced prompt for Pro model
-            enhanced_prompt = self._enhance_prompt_for_pro(prompt, resolution, negative_prompt)
+            # Enhanced prompt for Pro model. A follow-up turn is an edit instruction
+            # ("make it blue"), so it is sent as written.
+            if previous_interaction_id:
+                enhanced_prompt = prompt + (
+                    f"\n\nAvoid: {negative_prompt}" if negative_prompt else ""
+                )
+            else:
+                enhanced_prompt = self._enhance_prompt_for_pro(prompt, resolution, negative_prompt)
             contents.append(enhanced_prompt)
 
             # Add input images if provided (Pro benefits from images-first)
@@ -136,6 +156,13 @@ class ProImageService:
                 )
                 # Pro model: place images before text for better context
                 contents = image_parts + contents
+
+            # Video context goes first, like the documented video-to-image examples
+            if input_video_url:
+                video_part = gx.Part(
+                    file_data=gx.FileData(file_uri=input_video_url, mime_type="video/mp4")
+                )
+                contents = [video_part, *contents]
 
             progress.update(20, f"Sending requests to {self.config.model_name}...")
 
@@ -151,23 +178,25 @@ class ProImageService:
 
                     # Build generation config for the current image model.
                     # Resolution is passed and mapped to image_size in gemini_client.
-                    gen_config = {
-                        "resolution": resolution,  # Will be mapped to image_size (1K, 2K, 4K)
-                    }
+                    # A follow-up turn keeps the previous size unless one is given.
+                    gen_config = {}
+                    if not previous_interaction_id or resolution.lower() in ("1k", "2k", "4k"):
+                        gen_config["resolution"] = resolution
                     if self.config.supports_thinking:
                         gen_config["thinking_level"] = thinking_level.value
                     if enable_grounding and self.config.supports_grounding:
                         gen_config["enable_grounding"] = True
 
-                    response = self.gemini_client.generate_content(
+                    result = self.gemini_client.generate_image_result(
                         contents,
                         config=gen_config,
                         aspect_ratio=aspect_ratio,
+                        previous_interaction_id=previous_interaction_id,
+                        image_search=image_search,
+                        timeout=self.config.video_request_timeout if input_video_url else None,
                     )
-                    images = self.gemini_client.extract_images(response)
-                    grounding = (
-                        self.gemini_client.extract_grounding(response) if enable_grounding else None
-                    )
+                    images = result.images
+                    grounding = result.grounding
 
                     for j, image_bytes in enumerate(images):
                         # Pro metadata
@@ -188,6 +217,10 @@ class ProImageService:
                             ),
                             "grounding_enabled": enable_grounding,
                             "grounding": grounding,
+                            "image_search": image_search,
+                            "input_video_url": input_video_url,
+                            "interaction_id": result.interaction_id,
+                            "previous_interaction_id": previous_interaction_id,
                             "mime_type": f"image/{self.config.default_image_format}",
                             "synthid_watermark": True,
                             "prompt": prompt,
@@ -419,11 +452,11 @@ class ProImageService:
             if enable_grounding and self.config.supports_grounding:
                 gen_config["enable_grounding"] = True
 
-            response = self.gemini_client.generate_content(
+            result = self.gemini_client.generate_image_result(
                 contents, config=gen_config, aspect_ratio=aspect_ratio
             )
-            image_bytes_list = self.gemini_client.extract_images(response)
-            grounding = self.gemini_client.extract_grounding(response) if enable_grounding else None
+            image_bytes_list = result.images
+            grounding = result.grounding
 
             progress.update(70, "Processing edited image(s)...")
 
@@ -454,6 +487,7 @@ class ProImageService:
                     "negative_prompt": negative_prompt,
                     "grounding_enabled": enable_grounding,
                     "grounding": grounding,
+                    "interaction_id": result.interaction_id,
                 }
 
                 if output_path:

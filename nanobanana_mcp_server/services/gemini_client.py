@@ -1,4 +1,5 @@
 import base64
+from dataclasses import dataclass, field
 import logging
 from typing import Any
 from urllib.parse import urlsplit
@@ -14,7 +15,7 @@ from ..config.settings import (
     ProImageConfig,
     ServerConfig,
 )
-from ..core.exceptions import AuthenticationError
+from ..core.exceptions import AuthenticationError, GeminiAPIError, ValidationError
 
 # Tool resolution names -> API image_size values
 RESOLUTION_TO_IMAGE_SIZE = {"4k": "4K", "2k": "2K", "1k": "1K", "high": "1K"}
@@ -23,6 +24,15 @@ RESOLUTION_TO_IMAGE_SIZE = {"4k": "4K", "2k": "2K", "1k": "1K", "high": "1K"}
 def resolution_to_image_size(resolution: str) -> str:
     """Map a tool resolution ('high', '1k', '2k', '4k') to an API image_size."""
     return RESOLUTION_TO_IMAGE_SIZE.get(resolution.lower(), "1K")
+
+
+@dataclass
+class ImageResult:
+    """Images from one model call, with grounding info and the interaction to continue from."""
+
+    images: list[bytes] = field(default_factory=list)
+    grounding: dict[str, Any] | None = None
+    interaction_id: str | None = None
 
 
 class GeminiClient:
@@ -136,6 +146,8 @@ class GeminiClient:
         contents: list,
         config: dict[str, Any] | None = None,
         aspect_ratio: str | None = None,
+        image_search: bool = False,
+        timeout: int | None = None,
         **kwargs,
     ) -> any:
         """
@@ -145,6 +157,8 @@ class GeminiClient:
             contents: Content list (text, images, etc.)
             config: Generation configuration dict (model-specific parameters)
             aspect_ratio: Optional aspect ratio string (e.g., "16:9")
+            image_search: Ground with Google Image Search as well as web search
+            timeout: Per-request timeout in seconds (overrides the client default)
             **kwargs: Additional parameters
 
         Returns:
@@ -186,14 +200,25 @@ class GeminiClient:
                 if image_config_kwargs:
                     config_kwargs["image_config"] = gx.ImageConfig(**image_config_kwargs)
 
-                # Grounding with Google Search (Pro and NB2 only)
-                if (
+                # Grounding with Google Search (Pro and NB2 only; image search NB2 only)
+                if image_search and getattr(self.gemini_config, "supports_image_search", False):
+                    search_types = gx.SearchTypes(
+                        web_search=gx.WebSearch(), image_search=gx.ImageSearch()
+                    )
+                    config_kwargs["tools"] = [
+                        gx.Tool(google_search=gx.GoogleSearch(search_types=search_types))
+                    ]
+                    self.logger.info("Grounding with Google Web and Image Search enabled")
+                elif (
                     config
                     and config.get("enable_grounding")
                     and getattr(self.gemini_config, "supports_grounding", False)
                 ):
                     config_kwargs["tools"] = [gx.Tool(google_search=gx.GoogleSearch())]
                     self.logger.info("Grounding with Google Search enabled")
+
+                if timeout:
+                    config_kwargs["http_options"] = gx.HttpOptions(timeout=timeout * 1000)
 
                 # Merge filtered config parameters (excluding image_config related ones)
                 config_kwargs.update(filtered_config)
@@ -305,15 +330,238 @@ class GeminiClient:
             return None
 
         queries = list(getattr(grounding_metadata, "web_search_queries", None) or [])
+        image_queries = list(getattr(grounding_metadata, "image_search_queries", None) or [])
         sources = []
         for chunk in getattr(grounding_metadata, "grounding_chunks", None) or []:
             web = getattr(chunk, "web", None)
+            image = getattr(chunk, "image", None)
             if web and getattr(web, "uri", None):
                 sources.append({"title": getattr(web, "title", None), "uri": web.uri})
+            elif image and getattr(image, "source_uri", None):
+                sources.append(
+                    {
+                        "title": getattr(image, "title", None),
+                        "uri": image.source_uri,
+                        "image_uri": getattr(image, "image_uri", None),
+                    }
+                )
 
-        if not queries and not sources:
+        entry_point = getattr(grounding_metadata, "search_entry_point", None)
+        suggestions = getattr(entry_point, "rendered_content", None) if entry_point else None
+        return self._grounding_dict(queries, image_queries, sources, suggestions)
+
+    @staticmethod
+    def _grounding_dict(
+        queries: list[str],
+        image_queries: list[str],
+        sources: list[dict[str, Any]],
+        suggestions: str | None,
+    ) -> dict[str, Any] | None:
+        if not queries and not image_queries and not sources:
             return None
-        return {"search_queries": queries, "sources": sources}
+        grounding: dict[str, Any] = {"search_queries": queries, "sources": sources}
+        if image_queries:
+            grounding["image_search_queries"] = image_queries
+        if suggestions:
+            # Google requires showing these search suggestions with grounded results
+            grounding["search_suggestions_html"] = suggestions
+        return grounding
+
+    # --- Interactions API ---------------------------------------------------
+
+    @property
+    def uses_interactions(self) -> bool:
+        """Whether image requests go through the Interactions API.
+
+        Only API key auth on the default endpoint: Vertex AI and custom
+        GEMINI_BASE_URL endpoints keep using generate_content.
+        """
+        return (
+            getattr(self.config, "use_interactions", False)
+            and self.config.auth_method == AuthMethod.API_KEY
+            and not self.config.gemini_base_url
+        )
+
+    def generate_image_result(
+        self,
+        contents: list,
+        config: dict[str, Any] | None = None,
+        aspect_ratio: str | None = None,
+        previous_interaction_id: str | None = None,
+        image_search: bool = False,
+        timeout: int | None = None,
+    ) -> ImageResult:
+        """Generate images, through the Interactions API when available.
+
+        Image search grounding always uses generate_content: the Interactions API
+        returns it as an unexecuted function call.
+        """
+        config = config or {}
+        if previous_interaction_id and (image_search or not self.uses_interactions):
+            raise ValidationError(
+                "previous_interaction_id needs the Interactions API: API key auth, no "
+                "GEMINI_BASE_URL, NANOBANANA_USE_INTERACTIONS not false, and no image_search."
+            )
+
+        if self.uses_interactions and not image_search:
+            return self._generate_via_interactions(
+                contents, config, aspect_ratio, previous_interaction_id, timeout
+            )
+
+        response = self.generate_content(
+            contents,
+            config=config,
+            aspect_ratio=aspect_ratio,
+            image_search=image_search,
+            timeout=timeout,
+        )
+        grounded = image_search or config.get("enable_grounding")
+        return ImageResult(
+            images=self.extract_images(response),
+            grounding=self.extract_grounding(response) if grounded else None,
+        )
+
+    def _generate_via_interactions(
+        self,
+        contents: list,
+        config: dict[str, Any],
+        aspect_ratio: str | None,
+        previous_interaction_id: str | None,
+        timeout: int | None,
+    ) -> ImageResult:
+        response_format: dict[str, Any] = {"type": "image"}
+        if aspect_ratio:
+            response_format["aspect_ratio"] = aspect_ratio
+        if config.get("resolution"):
+            response_format["image_size"] = resolution_to_image_size(config["resolution"])
+
+        request: dict[str, Any] = {
+            "model": self.gemini_config.model_name,
+            "input": self._to_interaction_input(contents),
+            "response_format": response_format,
+            "store": True,  # Required to continue with previous_interaction_id
+        }
+        generation_config: dict[str, Any] = {}
+        thinking_config = self._filter_parameters(config).get("thinking_config")
+        if thinking_config:
+            generation_config["thinking_level"] = thinking_config.thinking_level.value.lower()
+        grounded = config.get("enable_grounding") and getattr(
+            self.gemini_config, "supports_grounding", False
+        )
+        if grounded:
+            request["tools"] = [{"type": "google_search"}]
+            # On this API the image models usually skip an optional search
+            generation_config["tool_choice"] = "any"
+        if generation_config:
+            request["generation_config"] = generation_config
+        if previous_interaction_id:
+            request["previous_interaction_id"] = previous_interaction_id
+        if timeout:
+            request["timeout"] = timeout
+
+        self.logger.debug(
+            f"Calling Interactions API: model={request['model']}, "
+            f"previous_interaction_id={previous_interaction_id}"
+        )
+        try:
+            interaction = self.client.interactions.create(**request)
+        except Exception as e:
+            self.logger.error(f"Gemini Interactions API error: {e}")
+            raise
+
+        images = self.extract_interaction_images(interaction)
+        if not images and interaction.status != "completed":
+            raise GeminiAPIError(
+                f"Interaction {interaction.id} ended with status '{interaction.status}' "
+                "and returned no image"
+            )
+        return ImageResult(
+            images=images,
+            grounding=self.extract_interaction_grounding(interaction) if grounded else None,
+            interaction_id=interaction.id,
+        )
+
+    @staticmethod
+    def _to_interaction_input(contents: list) -> list[dict[str, Any]]:
+        """Convert generate_content-style contents into Interactions input blocks."""
+
+        def media_block(uri: str, mime_type: str) -> dict[str, Any]:
+            kind = "video" if mime_type.startswith("video/") else "image"
+            return {"type": kind, "uri": uri, "mime_type": mime_type}
+
+        blocks: list[dict[str, Any]] = []
+        for item in contents:
+            if isinstance(item, str):
+                blocks.append({"type": "text", "text": item})
+            elif isinstance(item, dict) and "file_data" in item:
+                file_data = item["file_data"]
+                blocks.append(media_block(file_data["uri"], file_data["mime_type"]))
+            elif isinstance(item, gx.Part) and item.inline_data:
+                blocks.append(
+                    {
+                        "type": "image",
+                        "data": base64.b64encode(item.inline_data.data).decode("utf-8"),
+                        "mime_type": item.inline_data.mime_type,
+                    }
+                )
+            elif isinstance(item, gx.Part) and item.file_data:
+                blocks.append(media_block(item.file_data.file_uri, item.file_data.mime_type))
+            elif isinstance(item, gx.Part) and item.text:
+                blocks.append({"type": "text", "text": item.text})
+            else:
+                raise ValueError(f"Unsupported content for the Interactions API: {type(item)}")
+        return blocks
+
+    @staticmethod
+    def extract_interaction_images(interaction) -> list[bytes]:
+        """Image bytes from every model output step of an interaction."""
+        images = []
+        for step in getattr(interaction, "steps", None) or []:
+            if getattr(step, "type", None) != "model_output":
+                continue
+            for block in getattr(step, "content", None) or []:
+                if getattr(block, "type", None) == "image" and getattr(block, "data", None):
+                    images.append(base64.b64decode(block.data))
+        return images
+
+    def extract_interaction_grounding(self, interaction) -> dict[str, Any] | None:
+        """Search queries, cited sources and search suggestions from an interaction."""
+        queries: list[str] = []
+        image_queries: list[str] = []
+        sources: list[dict[str, Any]] = []
+        suggestions = None
+        for step in getattr(interaction, "steps", None) or []:
+            step_type = getattr(step, "type", None)
+            if step_type == "google_search_call":
+                arguments = getattr(step, "arguments", None)
+                if isinstance(arguments, dict):
+                    step_queries = arguments.get("queries")
+                else:
+                    step_queries = getattr(arguments, "queries", None)
+                target = (
+                    image_queries
+                    if getattr(step, "search_type", None) == "image_search"
+                    else queries
+                )
+                target.extend(step_queries or [])
+            elif step_type == "google_search_result":
+                for result in getattr(step, "result", None) or []:
+                    suggestions = suggestions or getattr(result, "search_suggestions", None)
+            elif step_type == "model_output":
+                for block in getattr(step, "content", None) or []:
+                    for annotation in getattr(block, "annotations", None) or []:
+                        if getattr(annotation, "type", None) == "url_citation":
+                            sources.append({"title": annotation.title, "uri": annotation.url})
+        return self._grounding_dict(queries, image_queries, sources, suggestions)
+
+    def get_interaction_model(self, interaction_id: str) -> str:
+        """Model that produced a stored interaction."""
+        try:
+            return self.client.interactions.get(interaction_id).model
+        except Exception as e:
+            raise ValidationError(
+                f"previous_interaction_id '{interaction_id}' could not be loaded: {e}"
+            ) from e
 
     def upload_file(self, file_path: str, _display_name: str | None = None):
         """Upload file to Gemini Files API.

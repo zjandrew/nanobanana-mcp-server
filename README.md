@@ -24,6 +24,9 @@ A production-ready **Model Context Protocol (MCP)** server that provides AI-powe
 - 🪶 **Nano Banana 2 Lite**: Fastest and cheapest model for high-volume 1K drafts
 - ⚡ **Gemini 2.5 Flash Image**: Legacy Flash model for high-volume rapid prototyping
 - 🖼️ **Up to 14 Reference Images**: Compose new images from many products, characters, or styles
+- 🔁 **Multi-Turn Editing**: Refine a result step by step with `previous_interaction_id`; the model keeps the conversation context
+- 🔎 **Image Search Grounding**: Use Google Image Search results as visual references (`image_search`, NB2)
+- 🎬 **Video to Image**: Make posters or thumbnails from a YouTube video (`input_video_url`, NB2/Lite)
 - 🤖 **Smart Model Selection**: Automatically routes to NB2 or Pro based on your prompt
 - 📐 **Aspect Ratio Control** ⭐ NEW: Specify output dimensions (1:1, 16:9, 9:16, 21:9, and more)
 - 📋 **Smart Templates**: Pre-built prompt templates for photography, design, and editing
@@ -371,6 +374,26 @@ generate_image(
     model_tier="lite"
 )
 
+# Multi-turn editing: every NB2/Pro/Lite result returns an interaction_id
+first = generate_image(prompt="A watercolor fox under a red umbrella in the rain", model_tier="pro")
+generate_image(
+    prompt="Make the umbrella yellow",          # Describe only the change
+    previous_interaction_id=first["interaction_id"]  # model_tier="auto" reuses Pro
+)
+
+# Ground on Google Image Search for subjects whose look matters (NB2 only)
+generate_image(
+    prompt="A detailed painting of a Timareta butterfly resting on a flower",
+    image_search=True              # Returns web + image search queries, sources, and search suggestions
+)
+
+# Poster or thumbnail from a YouTube video (NB2/Lite, takes about a minute)
+generate_image(
+    prompt="A poster that captures the key themes of this video",
+    input_video_url="https://www.youtube.com/watch?v=UTdfxFyOQTI",
+    aspect_ratio="16:9"
+)
+
 # Leverage Nano Banana Pro for complex reasoning
 generate_image(
     prompt="Cinematic scene: three characters in a tense standoff at dusk",
@@ -520,6 +543,10 @@ NANOBANANA_MODEL=auto  # Options: flash, nb2, pro, lite, auto (default: auto →
 # Optional
 IMAGE_OUTPUT_DIR=/path/to/image/directory  # Default: ~/nanobanana-images
 GEMINI_BASE_URL=https://custom-api.example.com  # Custom API endpoint (for proxies/gateways)
+NANOBANANA_USE_INTERACTIONS=true           # NB2/Pro/Lite use the Interactions API so results can be continued
+                                           # with previous_interaction_id. Conversations are stored by Google.
+                                           # Set to false to use generate_content only (no multi-turn editing).
+                                           # Vertex AI and GEMINI_BASE_URL always use generate_content.
 LOG_LEVEL=INFO                             # DEBUG, INFO, WARNING, ERROR
 LOG_FORMAT=standard                        # standard, json, detailed
 ```

@@ -33,6 +33,10 @@ class NanoBananaMCP:
             "(gemini-3.1-flash-lite-image, model_tier='lite') for the fastest and cheapest "
             "1K drafts, and legacy Nano Banana (gemini-2.5-flash-image, model_tier='flash'). "
             "Up to 14 reference images per request (input_image_paths). "
+            "To refine a result, call generate_image again with previous_interaction_id set "
+            "to the interaction_id it returned and describe only the change; the model keeps "
+            "the conversation context. Also supports Google Image Search grounding "
+            "(image_search) and YouTube videos as visual context (input_video_url). "
             "Returns images as real MCP image content blocks, and also provides structured "
             "JSON with metadata and reproducibility hints."
         )
