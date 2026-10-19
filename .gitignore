@@ -63,6 +63,7 @@ config/local.py
 
 # Claude Code memory files
 .claude-memory
+.claude/settings.local.json
 
 blog/
 
