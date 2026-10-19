@@ -22,6 +22,7 @@ class ModelSelector:
         pro_service: ProImageService,
         nb2_service: ProImageService,
         selection_config: ModelSelectionConfig,
+        lite_service: ProImageService | None = None,
     ):
         """
         Initialize model selector.
@@ -31,10 +32,12 @@ class ModelSelector:
             pro_service: Gemini 3 Pro Image service (quality-optimized)
             nb2_service: Nano Banana 2.1 service (Flash speed + Pro quality)
             selection_config: Selection strategy configuration
+            lite_service: Nano Banana 2 Lite service (fastest and cheapest)
         """
         self.flash_service = flash_service
         self.pro_service = pro_service
         self.nb2_service = nb2_service
+        self.lite_service = lite_service
         self.config = selection_config
         self.logger = logging.getLogger(__name__)
 
@@ -52,7 +55,19 @@ class ModelSelector:
         Returns:
             Tuple of (selected_service, selected_tier)
         """
+        # A configured default (NANOBANANA_MODEL) replaces automatic selection
+        if requested_tier in (ModelTier.AUTO, None) and self.config.default_tier != ModelTier.AUTO:
+            self.logger.info(f"Using configured default tier: {self.config.default_tier.value}")
+            requested_tier = self.config.default_tier
+
         # Explicit selection takes precedence
+        if requested_tier == ModelTier.LITE:
+            if self.lite_service is None:
+                self.logger.warning("Lite service unavailable, falling back to NB2")
+                return self.nb2_service, ModelTier.NB2
+            self.logger.info("Explicit Nano Banana 2 Lite model selection")
+            return self.lite_service, ModelTier.LITE
+
         if requested_tier == ModelTier.FLASH:
             self.logger.info("Explicit Flash model selection")
             return self.flash_service, ModelTier.FLASH
@@ -207,6 +222,19 @@ class ModelSelector:
                 ],
                 "best_for": "Production images at Flash speed",
                 "emoji": "🍌",
+            }
+        elif tier == ModelTier.LITE:
+            return {
+                "tier": "lite",
+                "name": "Nano Banana 2 Lite",
+                "model_id": "gemini-3.1-flash-lite-image",
+                "max_resolution": "1K",
+                "features": [
+                    "Fastest and cheapest generation",
+                    "Extreme aspect ratios (4:1, 1:4, 8:1, 1:8)",
+                ],
+                "best_for": "High-volume drafts; not for multi-reference or multi-turn edits",
+                "emoji": "🪶",
             }
         else:  # FLASH
             return {

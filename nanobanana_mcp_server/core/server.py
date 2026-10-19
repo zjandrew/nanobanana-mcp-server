@@ -29,8 +29,10 @@ class NanoBananaMCP:
             "Nano Banana 2.1 (gemini-nano-banana-2.1, model_tier='nb2') by default — "
             "Flash-speed generation with 4K resolution, Google Search grounding, "
             "and subject consistency. Also supports Nano Banana Pro (gemini-3-pro-image, "
-            "model_tier='pro') for maximum reasoning quality, and legacy Nano Banana "
-            "(gemini-2.5-flash-image, model_tier='flash'). "
+            "model_tier='pro') for maximum reasoning quality, Nano Banana 2 Lite "
+            "(gemini-3.1-flash-lite-image, model_tier='lite') for the fastest and cheapest "
+            "1K drafts, and legacy Nano Banana (gemini-2.5-flash-image, model_tier='flash'). "
+            "Up to 14 reference images per request (input_image_paths). "
             "Returns images as real MCP image content blocks, and also provides structured "
             "JSON with metadata and reproducibility hints."
         )

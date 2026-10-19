@@ -12,11 +12,11 @@ from fastmcp.utilities.types import Image as MCPImage
 from PIL import Image as PILImage
 
 from ..config.settings import MediaResolution, ProImageConfig, ThinkingLevel
-from ..core.exceptions import ImageProcessingError
+from ..core.exceptions import ImageProcessingError, ValidationError
 from ..core.progress_tracker import ProgressContext
 from ..utils.image_utils import create_thumbnail, validate_image_format
 from ..utils.validation_utils import resolve_output_path, validate_aspect_ratio_string
-from .gemini_client import GeminiClient
+from .gemini_client import GeminiClient, resolution_to_image_size
 from .image_storage_service import ImageStorageService
 
 
@@ -33,11 +33,17 @@ class ProImageService:
         self.config = config
         self.storage_service = storage_service
         self.logger = logging.getLogger(__name__)
-        self._tier_label = (
-            "nb2"
-            if config.model_name.strip().lower() == "gemini-nano-banana-2.1"
-            else "pro"
-        )
+        self._tier_label = config.tier_label
+
+    def _validate_image_size(self, resolution: str) -> None:
+        """Reject output sizes this model does not support."""
+        image_size = resolution_to_image_size(resolution)
+        if image_size not in self.config.supported_image_sizes:
+            raise ValidationError(
+                f"{self.config.model_name} does not support {image_size} output "
+                f"(supported: {', '.join(self.config.supported_image_sizes)}). "
+                "Use model_tier='nb2' or 'pro' for 2K/4K."
+            )
 
     def generate_images(
         self,
@@ -81,12 +87,13 @@ class ProImageService:
             Tuple of (image_blocks_or_resource_links, metadata_list)
         """
         # Apply defaults from config
-        if thinking_level is None:
-            thinking_level = self.config.default_thinking_level
+        thinking_level = self.config.resolve_thinking_level(thinking_level)
         if enable_grounding is None:
             enable_grounding = self.config.enable_search_grounding
         if media_resolution is None:
             media_resolution = self.config.default_media_resolution
+
+        self._validate_image_size(resolution)
 
         # Validate aspect_ratio if provided
         if aspect_ratio:
@@ -97,7 +104,7 @@ class ProImageService:
 
         with ProgressContext(
             "pro_image_generation",
-            f"Generating {n} high-quality image(s) with Gemini 3 Pro...",
+            f"Generating {n} image(s) with {self.config.model_name}...",
             {"prompt": prompt[:100], "count": n, "resolution": resolution},
         ) as progress:
             progress.update(5, "Configuring Pro model parameters...")
@@ -130,7 +137,7 @@ class ProImageService:
                 # Pro model: place images before text for better context
                 contents = image_parts + contents
 
-            progress.update(20, "Sending requests to Gemini 3 Pro API...")
+            progress.update(20, f"Sending requests to {self.config.model_name}...")
 
             # Generate images
             all_images = []
@@ -195,7 +202,7 @@ class ProImageService:
                             image_hash = hashlib.md5(
                                 image_bytes, usedforsecurity=False
                             ).hexdigest()[:8]
-                            default_filename = f"pro_{timestamp}_{i + 1}_{j + 1}_{image_hash}.{self.config.default_image_format}"
+                            default_filename = f"{self._tier_label}_{timestamp}_{i + 1}_{j + 1}_{image_hash}.{self.config.default_image_format}"
                             overall_index = (i * len(images)) + j + 1
 
                             full_path = resolve_output_path(
@@ -344,8 +351,7 @@ class ProImageService:
         Output size follows the source image unless aspect_ratio or an explicit
         resolution ('1k', '2k', '4k') is given.
         """
-        if thinking_level is None:
-            thinking_level = self.config.default_thinking_level
+        thinking_level = self.config.resolve_thinking_level(thinking_level)
         if media_resolution is None:
             media_resolution = self.config.default_media_resolution
         if enable_grounding is None:
@@ -353,6 +359,8 @@ class ProImageService:
 
         # Only an explicit size overrides the source image's size
         image_size = resolution if resolution and resolution.lower() in ("1k", "2k", "4k") else None
+        if image_size:
+            self._validate_image_size(image_size)
 
         if aspect_ratio:
             validate_aspect_ratio_string(

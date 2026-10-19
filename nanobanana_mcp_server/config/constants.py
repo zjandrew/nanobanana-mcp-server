@@ -9,7 +9,10 @@ ASPECT_RATIOS = ["Square image", "Portrait", "Landscape", "16:9", "4:3"]
 # File processing constants
 THUMBNAIL_SIZE = 256
 TEMP_FILE_SUFFIX = ".tmp"
-MAX_INPUT_IMAGES = 3
+# Reference images per request: Gemini 3 image models take up to 14,
+# gemini-2.5-flash-image works best with up to 3
+MAX_INPUT_IMAGES = 14
+MAX_INPUT_IMAGES_BY_TIER = {"flash": 3, "nb2": 14, "pro": 14, "lite": 14}
 
 # Image processing defaults
 DEFAULT_IMAGE_FORMAT = "png"

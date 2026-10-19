@@ -16,6 +16,7 @@ from nanobanana_mcp_server.config.settings import (
         (ModelTier.FLASH, "gemini-2.5-flash-image"),
         (ModelTier.NB2, "gemini-nano-banana-2.1"),
         (ModelTier.PRO, "gemini-3-pro-image"),
+        (ModelTier.LITE, "gemini-3.1-flash-lite-image"),
     ],
 )
 def test_explicit_tier_names_its_model(tier: ModelTier, model_name: str):

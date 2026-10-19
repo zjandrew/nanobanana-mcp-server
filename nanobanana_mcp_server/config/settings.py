@@ -15,6 +15,7 @@ class ModelTier(str, Enum):
     FLASH = "flash"  # Speed-optimized (Gemini 2.5 Flash)
     PRO = "pro"  # Quality-optimized (Gemini 3 Pro)
     NB2 = "nb2"  # Nano Banana 2.1 (Flash speed + Pro quality)
+    LITE = "lite"  # Nano Banana 2 Lite (fastest and cheapest, 1K only)
     AUTO = "auto"  # Automatic selection
 
 
@@ -150,9 +151,12 @@ class ProImageConfig(BaseModelConfig):
     """Gemini 3 Pro Image configuration (quality-optimized)."""
 
     model_name: str = "gemini-3-pro-image"
+    tier_label: str = "pro"
     max_resolution: int = 3840  # 4K
     default_resolution: str = "high"  # low/medium/high
     default_thinking_level: ThinkingLevel = ThinkingLevel.HIGH
+    supported_thinking_levels: tuple[ThinkingLevel, ...] = ()
+    supported_image_sizes: tuple[str, ...] = ("1K", "2K", "4K")
     default_media_resolution: MediaResolution = MediaResolution.HIGH
     supports_thinking: bool = False
     supports_grounding: bool = True
@@ -161,15 +165,53 @@ class ProImageConfig(BaseModelConfig):
     enable_search_grounding: bool = False  # Opt-in: adds a Google Search call per request
     request_timeout: int = 90  # Pro model needs more time for 4K
 
+    def resolve_thinking_level(self, level: ThinkingLevel | None) -> ThinkingLevel:
+        """Map a requested thinking level onto one this model accepts."""
+        if level is None:
+            return self.default_thinking_level
+        if level == ThinkingLevel.LOW:
+            level = ThinkingLevel.MINIMAL
+        if self.supported_thinking_levels and level not in self.supported_thinking_levels:
+            return self.default_thinking_level
+        return level
+
 
 @dataclass
 class NanoBanana2Config(ProImageConfig):
     """Nano Banana 2.1 configuration (Flash speed + Pro quality)."""
 
     model_name: str = "gemini-nano-banana-2.1"
+    tier_label: str = "nb2"
     default_thinking_level: ThinkingLevel = ThinkingLevel.MEDIUM  # Matches the API default
+    supported_thinking_levels: tuple[ThinkingLevel, ...] = (
+        ThinkingLevel.MINIMAL,
+        ThinkingLevel.MEDIUM,
+        ThinkingLevel.HIGH,
+    )
     request_timeout: int = 60  # Flash-speed model
-    supports_thinking: bool = True  # Supports minimal/medium/high thinking
+    supports_thinking: bool = True
+    supports_extreme_aspect_ratios: bool = True  # 4:1, 1:4, 8:1, 1:8
+
+
+@dataclass
+class LiteImageConfig(ProImageConfig):
+    """Nano Banana 2 Lite configuration (fastest and cheapest).
+
+    The API rejects 2K/4K output, MEDIUM thinking, and the Google Search tool.
+    """
+
+    model_name: str = "gemini-3.1-flash-lite-image"
+    tier_label: str = "lite"
+    max_resolution: int = 1024  # 1K only
+    default_thinking_level: ThinkingLevel = ThinkingLevel.MINIMAL  # Matches the API default
+    supported_thinking_levels: tuple[ThinkingLevel, ...] = (
+        ThinkingLevel.MINIMAL,
+        ThinkingLevel.HIGH,
+    )
+    supported_image_sizes: tuple[str, ...] = ("1K",)
+    request_timeout: int = 60
+    supports_thinking: bool = True
+    supports_grounding: bool = False
     supports_extreme_aspect_ratios: bool = True  # 4:1, 1:4, 8:1, 1:8
 
 
@@ -230,6 +272,7 @@ def describe_default_model(tier: ModelTier) -> str:
         ModelTier.FLASH: FlashImageConfig().model_name,
         ModelTier.PRO: ProImageConfig().model_name,
         ModelTier.NB2: NanoBanana2Config().model_name,
+        ModelTier.LITE: LiteImageConfig().model_name,
     }
     if tier == ModelTier.AUTO:
         return (

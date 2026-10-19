@@ -1,6 +1,6 @@
 [project]
 name = "andrew-nanobanana-mcp-server"
-version = "0.5.0"
+version = "0.6.0"
 description = "A production-ready MCP server for AI-powered image generation using Nano Banana 2.1 (default), Gemini 3 Pro Image, and Gemini 2.5 Flash Image with intelligent model selection"
 authors = [
     { name = "zhongwei", email = "lizhongwei.nkcs@gmail.com" }

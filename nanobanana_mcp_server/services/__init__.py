@@ -6,6 +6,7 @@ from typing import Optional
 from ..config.settings import (
     FlashImageConfig,
     GeminiConfig,
+    LiteImageConfig,
     ModelSelectionConfig,
     NanoBanana2Config,
     ProImageConfig,
@@ -40,6 +41,8 @@ _pro_gemini_client: GeminiClient | None = None
 _pro_image_service: ProImageService | None = None
 _nb2_gemini_client: GeminiClient | None = None
 _nb2_image_service: ProImageService | None = None
+_lite_gemini_client: GeminiClient | None = None
+_lite_image_service: ProImageService | None = None
 _model_selector: ModelSelector | None = None
 
 
@@ -59,6 +62,8 @@ def initialize_services(server_config: ServerConfig, gemini_config: GeminiConfig
         _pro_image_service, \
         _nb2_gemini_client, \
         _nb2_image_service, \
+        _lite_gemini_client, \
+        _lite_image_service, \
         _model_selector, \
         _server_config
 
@@ -98,12 +103,18 @@ def initialize_services(server_config: ServerConfig, gemini_config: GeminiConfig
     _nb2_gemini_client = GeminiClient(server_config, nb2_config)
     _nb2_image_service = ProImageService(_nb2_gemini_client, nb2_config, _image_storage_service)
 
+    # Create Lite image service (Nano Banana 2 Lite — fastest and cheapest)
+    lite_config = LiteImageConfig()
+    _lite_gemini_client = GeminiClient(server_config, lite_config)
+    _lite_image_service = ProImageService(_lite_gemini_client, lite_config, _image_storage_service)
+
     # Create model selector
     _model_selector = ModelSelector(
         _file_image_service,  # Flash service
         _pro_image_service,  # Pro service
         _nb2_image_service,  # NB2 service
         selection_config,
+        lite_service=_lite_image_service,
     )
 
 
@@ -182,6 +193,13 @@ def get_nb2_image_service() -> ProImageService:
     if _nb2_image_service is None:
         raise RuntimeError("Services not initialized. Call initialize_services() first.")
     return _nb2_image_service
+
+
+def get_lite_image_service() -> ProImageService:
+    """Get the Nano Banana 2 Lite image service instance."""
+    if _lite_image_service is None:
+        raise RuntimeError("Services not initialized. Call initialize_services() first.")
+    return _lite_image_service
 
 
 def get_model_selector() -> ModelSelector:

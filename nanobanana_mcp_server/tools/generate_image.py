@@ -9,10 +9,13 @@ from fastmcp.tools.tool import ToolResult
 from mcp.types import TextContent
 from pydantic import Field
 
-from ..config.constants import MAX_INPUT_IMAGES
+from ..config.constants import MAX_INPUT_IMAGES, MAX_INPUT_IMAGES_BY_TIER
 from ..config.settings import ModelTier, ThinkingLevel
 from ..core.exceptions import ValidationError
 from ..utils.validation_utils import validate_input_image_path, validate_output_path
+
+# Tiers whose models accept a thinking level
+THINKING_TIERS = (ModelTier.NB2, ModelTier.LITE)
 
 
 def register_generate_image_tool(server: FastMCP):
@@ -58,6 +61,18 @@ def register_generate_image_tool(server: FastMCP):
             str | None,
             Field(description="Path to the third input image (png, jpg, jpeg, webp, or gif)."),
         ] = None,
+        input_image_paths: Annotated[
+            list[str] | None,
+            Field(
+                description="Paths to input/reference images (png, jpg, jpeg, webp, or gif): "
+                "up to 14 for 'nb2', 'pro' and 'lite', 3 for 'flash'. Appended after "
+                "input_image_path_1..3. One image edits it; several images are references "
+                "for a new image. Say each image's role in the prompt (e.g. 'image 1 is the "
+                "product, image 2 is the style'). Nano Banana 2.1 keeps up to 10 objects "
+                "and 4 characters consistent; Pro up to 6 objects, 5 characters, 3 styles.",
+                max_length=MAX_INPUT_IMAGES,
+            ),
+        ] = None,
         file_id: Annotated[
             str | None,
             Field(
@@ -78,23 +93,27 @@ def register_generate_image_tool(server: FastMCP):
                 description="Model tier: 'flash' (legacy Nano Banana, gemini-2.5-flash-image, 1024px), "
                 "'nb2' (Nano Banana 2.1, gemini-nano-banana-2.1, 4K at Flash speed, default), "
                 "'pro' (Nano Banana Pro, gemini-3-pro-image, max quality, 4K), "
+                "'lite' (Nano Banana 2 Lite, gemini-3.1-flash-lite-image, fastest and "
+                "cheapest, 1K only, no grounding), "
                 "or 'auto' (smart selection). "
-                "Default: 'auto' - automatically selects nb2 or pro based on prompt."
+                "Default: 'auto' - automatically selects nb2 or pro based on prompt, "
+                "unless the server sets NANOBANANA_MODEL."
             ),
         ] = "auto",
         resolution: Annotated[
             str | None,
             Field(
                 description="Output resolution: '1k', '2k', '4k', or 'high' (= 1k). "
-                "2K and 4K available with 'nb2' and 'pro' models. In edit mode the output "
+                "2K and 4K available with 'nb2' and 'pro' ('lite' is 1K only). In edit mode the output "
                 "keeps the source image's size unless '1k', '2k' or '4k' is given. Default: 'high'."
             ),
         ] = "high",
         thinking_level: Annotated[
             str | None,
             Field(
-                description="Reasoning depth for the 'nb2' model: 'minimal' (fastest), "
-                "'medium' (default), or 'high' (best for complex compositions). "
+                description="Reasoning depth for 'nb2' and 'lite': 'minimal' (fastest), "
+                "'medium' (nb2 default), or 'high' (best for complex compositions). "
+                "'lite' supports only 'minimal' (default) and 'high'. "
                 "'low' is accepted as an alias for 'minimal'. "
                 "'high' also biases auto-selection toward Pro. Default: None (model default)."
             ),
@@ -102,7 +121,7 @@ def register_generate_image_tool(server: FastMCP):
         enable_grounding: Annotated[
             bool,
             Field(
-                description="Ground the image in live Google Search results (NB2 and Pro models). "
+                description="Ground the image in live Google Search results ('nb2' and 'pro' only). "
                 "Use for current or factual subjects such as weather, events, charts, or real "
                 "places. Adds latency and search cost. Default: false."
             ),
@@ -128,7 +147,7 @@ def register_generate_image_tool(server: FastMCP):
             Field(
                 description="Optional output aspect ratio (e.g., '16:9'). "
                 "Standard: 1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, 16:9, 21:9. "
-                "Extreme (nb2 only): 4:1, 1:4, 8:1, 1:8."
+                "Extreme (nb2 and lite only): 4:1, 1:4, 8:1, 1:8."
             ),
         ] = None,
         output_path: Annotated[
@@ -166,9 +185,10 @@ def register_generate_image_tool(server: FastMCP):
         logger = logging.getLogger(__name__)
 
         try:
-            # Construct input_image_paths list from individual parameters
+            # Combine the individual path parameters with the input_image_paths list
+            listed_paths = input_image_paths or []
             input_image_paths = []
-            for path in [input_image_path_1, input_image_path_2, input_image_path_3]:
+            for path in [input_image_path_1, input_image_path_2, input_image_path_3, *listed_paths]:
                 if path:
                     input_image_paths.append(path)
 
@@ -240,8 +260,17 @@ def register_generate_image_tool(server: FastMCP):
                 raise ValidationError("Mode must be 'auto', 'generate', or 'edit'")
 
             if input_image_paths:
-                if len(input_image_paths) > MAX_INPUT_IMAGES:
-                    raise ValidationError(f"Maximum {MAX_INPUT_IMAGES} input images allowed")
+                max_images = MAX_INPUT_IMAGES_BY_TIER.get(selected_tier.value, MAX_INPUT_IMAGES)
+                if len(input_image_paths) > max_images:
+                    raise ValidationError(
+                        f"{model_info['name']} accepts at most {max_images} input images "
+                        f"(got {len(input_image_paths)})"
+                        + (
+                            "; use model_tier='nb2' or 'pro' for up to 14"
+                            if max_images < 14
+                            else ""
+                        )
+                    )
 
                 resolved_paths = []
                 for i, path in enumerate(input_image_paths):
@@ -298,7 +327,7 @@ def register_generate_image_tool(server: FastMCP):
                             output_path=output_path,
                             thinking_level=(
                                 ThinkingLevel(thinking_level)
-                                if (thinking_level and selected_tier == ModelTier.NB2)
+                                if (thinking_level and selected_tier in THINKING_TIERS)
                                 else None
                             ),
                             aspect_ratio=aspect_ratio,
@@ -335,7 +364,7 @@ def register_generate_image_tool(server: FastMCP):
                             output_path=output_path,
                             thinking_level=(
                                 ThinkingLevel(thinking_level)
-                                if (thinking_level and selected_tier == ModelTier.NB2)
+                                if (thinking_level and selected_tier in THINKING_TIERS)
                                 else None
                             ),
                             aspect_ratio=aspect_ratio,
@@ -403,9 +432,11 @@ def register_generate_image_tool(server: FastMCP):
                         input_images=input_images,
                         use_storage=True,
                     )
-                elif selected_tier == ModelTier.NB2:
-                    # Use NB2 service (Flash speed + Pro quality, supports thinking)
-                    logger.info(f"Using NB2 model: {model_info['model_id']}")
+                elif selected_tier in THINKING_TIERS:
+                    # NB2 / Lite services (Flash speed, support thinking)
+                    logger.info(
+                        f"Using {selected_tier.value.upper()} model: {model_info['model_id']}"
+                    )
                     thumbnail_images, metadata = selected_service.generate_images(
                         prompt=prompt,
                         n=n,
@@ -504,12 +535,16 @@ def register_generate_image_tool(server: FastMCP):
                 action_verb = "Edited" if detected_mode == "edit" else "Generated"
                 model_name = model_info["name"]
                 model_emoji = model_info["emoji"]
-                if selected_tier == ModelTier.NB2 and not thinking_level:
-                    # Report the level the service actually used (model default)
+                if selected_tier in THINKING_TIERS:
+                    # Report the level the service actually used (default or remapped)
                     thinking_level = next(
                         (m.get("thinking_level") for m in metadata if m.get("thinking_level")),
-                        None,
+                        thinking_level,
                     )
+                grounding_applied = enable_grounding and selected_tier in (
+                    ModelTier.PRO,
+                    ModelTier.NB2,
+                )
                 grounding = next((m.get("grounding") for m in metadata if m.get("grounding")), None)
                 summary_lines = [
                     f"✅ {action_verb} {len(metadata)} image(s) with {model_emoji} {model_name}.",
@@ -519,14 +554,16 @@ def register_generate_image_tool(server: FastMCP):
                 # Add model-specific information
                 if selected_tier == ModelTier.PRO:
                     summary_lines.append(f"📏 **Resolution**: {resolution}")
-                    if enable_grounding:
+                    if grounding_applied:
                         summary_lines.append("🔍 **Grounding**: Enabled (Google Search)")
-                elif selected_tier == ModelTier.NB2:
+                elif selected_tier in THINKING_TIERS:
                     if thinking_level:
                         summary_lines.append(f"🧠 **Thinking Level**: {thinking_level}")
                     summary_lines.append(f"📏 **Resolution**: {resolution}")
-                    if enable_grounding:
+                    if grounding_applied:
                         summary_lines.append("🔍 **Grounding**: Enabled (Google Search)")
+                    elif enable_grounding:
+                        summary_lines.append("🔍 **Grounding**: Not supported by this model")
                     if aspect_ratio in ("4:1", "1:4", "8:1", "1:8"):
                         summary_lines.append(f"📐 **Extreme Aspect Ratio**: {aspect_ratio}")
                 if grounding:
@@ -604,7 +641,7 @@ def register_generate_image_tool(server: FastMCP):
                 "model_id": model_info["model_id"],
                 "requested_tier": model_tier,
                 "auto_selected": tier == ModelTier.AUTO,
-                "thinking_level": thinking_level if selected_tier == ModelTier.NB2 else None,
+                "thinking_level": thinking_level if selected_tier in THINKING_TIERS else None,
                 "resolution": resolution,
                 "grounding_enabled": enable_grounding
                 if selected_tier in (ModelTier.PRO, ModelTier.NB2)

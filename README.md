@@ -18,10 +18,12 @@ A production-ready **Model Context Protocol (MCP)** server that provides AI-powe
 
 ## ✨ Features
 
-- 🎨 **Multi-Model AI Image Generation**: Three Gemini models with intelligent automatic selection
+- 🎨 **Multi-Model AI Image Generation**: Four Gemini image models with intelligent automatic selection
 - 🍌 **Nano Banana 2.1 (NB2)**: Default model — 4K resolution at Flash speed with grounding
 - 🏆 **Gemini 3 Pro Image**: Maximum reasoning depth for the most complex compositions
+- 🪶 **Nano Banana 2 Lite**: Fastest and cheapest model for high-volume 1K drafts
 - ⚡ **Gemini 2.5 Flash Image**: Legacy Flash model for high-volume rapid prototyping
+- 🖼️ **Up to 14 Reference Images**: Compose new images from many products, characters, or styles
 - 🤖 **Smart Model Selection**: Automatically routes to NB2 or Pro based on your prompt
 - 📐 **Aspect Ratio Control** ⭐ NEW: Specify output dimensions (1:1, 16:9, 9:16, 21:9, and more)
 - 📋 **Smart Templates**: Pre-built prompt templates for photography, design, and editing
@@ -258,7 +260,7 @@ python -m nanobanana_mcp_server.server
 
 ## 🤖 Model Selection
 
-Nano Banana supports three Gemini models with intelligent automatic selection:
+Nano Banana supports four Gemini image models with intelligent automatic selection:
 
 ### 🍌 NB2 — Nano Banana 2.1 (gemini-nano-banana-2.1) ⭐ DEFAULT
 
@@ -288,6 +290,17 @@ Nano Banana supports three Gemini models with intelligent automatic selection:
   - 📐 **Media Resolution Control**: Fine-tune vision processing detail
 - **Best for**: Complex narrative scenes, intricate compositions, maximum reasoning required
 - **model_tier**: `"pro"`
+
+### 🪶 Lite Model — Nano Banana 2 Lite (gemini-3.1-flash-lite-image)
+
+**Fastest and cheapest, for high-volume drafts**
+
+- **Resolution**: 1K only (2K/4K requests are rejected)
+- **Speed**: ~3-5 seconds per image
+- **Thinking Levels**: `minimal` (default) or `high`
+- **Aspect Ratios**: Standard plus extreme (4:1, 1:4, 8:1, 1:8)
+- **Limitations**: No Google Search grounding; not optimized for multiple references or multi-turn edits
+- **model_tier**: `"lite"` (never chosen by `auto`; set `NANOBANANA_MODEL=lite` to make it the default)
 
 ### ⚡ Flash Model (Gemini 2.5 Flash Image)
 
@@ -343,6 +356,19 @@ generate_image(
     input_image_path_1="/path/to/product.png",
     aspect_ratio="1:1",            # Change the canvas shape
     resolution="2k"                # Explicit 1k / 2k / 4k
+)
+
+# Compose a new image from up to 14 reference images (3 for flash)
+generate_image(
+    prompt="Image 1 is the product, images 2-4 are the models. Show each model holding the product",
+    model_tier="nb2",
+    input_image_paths=["/refs/product.png", "/refs/model_a.png", "/refs/model_b.png", "/refs/model_c.png"]
+)
+
+# Fastest and cheapest drafts (1K only)
+generate_image(
+    prompt="Rough storyboard frame of a banana surfing",
+    model_tier="lite"
 )
 
 # Leverage Nano Banana Pro for complex reasoning
@@ -489,7 +515,7 @@ GCP_PROJECT_ID=your-project-id
 GCP_REGION=global  # Required for gemini-3-pro-image and Nano Banana 2.1; use "us-central1" only for legacy 2.5 Flash Image
 
 # Model Selection (optional)
-NANOBANANA_MODEL=auto  # Options: flash, nb2, pro, auto (default: auto → nb2)
+NANOBANANA_MODEL=auto  # Options: flash, nb2, pro, lite, auto (default: auto → nb2). A non-auto value is used whenever a request asks for model_tier="auto"
 
 # Optional
 IMAGE_OUTPUT_DIR=/path/to/image/directory  # Default: ~/nanobanana-images

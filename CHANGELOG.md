@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-10-19
+
+### Added
+- **Up to 14 reference images**: New `input_image_paths` list parameter, appended after `input_image_path_1..3`. NB2, Pro and Lite accept up to 14 images; Flash stays at 3. Over-limit requests fail with a message naming the limit.
+- **`lite` tier — Nano Banana 2 Lite** (`gemini-3.1-flash-lite-image`): fastest and cheapest model. Behavior matches the live API: 1K output only (2K/4K are rejected with a clear error before calling the API), thinking `minimal` (default) or `high` (`medium` falls back to `minimal`), extreme aspect ratios supported, no Google Search grounding. `auto` never selects it.
+
+### Fixed
+- **`NANOBANANA_MODEL` had no effect**: it was only logged at startup. A non-`auto` value now replaces automatic selection for requests that use `model_tier="auto"`; an explicit `model_tier` still wins.
+
+### Changed
+- Generated files are named after the tier that made them (`nb2_…`, `lite_…`, `pro_…`) instead of always `pro_…`.
+
 ## [0.5.0] - 2026-10-19
 
 ### Fixed

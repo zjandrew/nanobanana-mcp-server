@@ -11,11 +11,18 @@ from ..config.settings import (
     BaseModelConfig,
     FlashImageConfig,
     GeminiConfig,
-    NanoBanana2Config,
     ProImageConfig,
     ServerConfig,
 )
 from ..core.exceptions import AuthenticationError
+
+# Tool resolution names -> API image_size values
+RESOLUTION_TO_IMAGE_SIZE = {"4k": "4K", "2k": "2K", "1k": "1K", "high": "1K"}
+
+
+def resolution_to_image_size(resolution: str) -> str:
+    """Map a tool resolution ('high', '1k', '2k', '4k') to an API image_size."""
+    return RESOLUTION_TO_IMAGE_SIZE.get(resolution.lower(), "1K")
 
 
 class GeminiClient:
@@ -172,14 +179,7 @@ class GeminiClient:
                 # Map resolution to image_size for Pro model
                 resolution = config.get("resolution") if config else None
                 if resolution:
-                    # Map resolution names to API image_size values
-                    resolution_map = {
-                        "4k": "4K",
-                        "2k": "2K",
-                        "1k": "1K",
-                        "high": "1K",  # Default high to 1K
-                    }
-                    image_size = resolution_map.get(resolution.lower(), "1K")
+                    image_size = resolution_to_image_size(resolution)
                     image_config_kwargs["image_size"] = image_size
                     self.logger.info(f"Setting image_size={image_size} for resolution={resolution}")
 
@@ -244,11 +244,11 @@ class GeminiClient:
             if param in config:
                 filtered[param] = config[param]
 
-        # NB2-specific parameters
-        if isinstance(self.gemini_config, NanoBanana2Config):
+        # Thinking-capable image models (NB2, Lite)
+        if getattr(self.gemini_config, "supports_thinking", False):
             if "thinking_level" in config:
                 level = config["thinking_level"].upper()
-                # Nano Banana 2.1 supports minimal/medium/high and rejects LOW
+                # Gemini 3.1 image models reject LOW; MINIMAL is the equivalent
                 if level == "LOW":
                     level = "MINIMAL"
                 filtered["thinking_config"] = gx.ThinkingConfig(
